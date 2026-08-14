@@ -3,9 +3,48 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import type { Style } from "@/lib/types";
+import type { AccentColor, Style, TextStyle } from "@/lib/types";
 
 type RecordingState = "idle" | "recording" | "recorded";
+
+// Mirrors worker/index.js's TEXT_STYLES — three curated title looks rather
+// than an open font picker, so every choice is guaranteed to render well.
+const TEXT_STYLE_OPTIONS: {
+  id: TextStyle;
+  label: string;
+  sample: string;
+  fontVar: string;
+  uppercase?: boolean;
+}[] = [
+  {
+    id: "calligraphy",
+    label: "Calligraphy",
+    sample: "Grace & Peace",
+    fontVar: "var(--font-calligraphy)",
+  },
+  {
+    id: "modern",
+    label: "Modern",
+    sample: "GRACE & PEACE",
+    fontVar: "var(--font-modern)",
+    uppercase: true,
+  },
+  {
+    id: "handwritten",
+    label: "Handwritten",
+    sample: "Grace & Peace",
+    fontVar: "var(--font-handwritten)",
+  },
+];
+
+// Mirrors worker/index.js's ACCENT_COLORS.
+const ACCENT_COLOR_OPTIONS: { id: AccentColor; label: string; hex: string }[] = [
+  { id: "gold", label: "Gold", hex: "#f5c451" },
+  { id: "rose", label: "Rose", hex: "#e98a9c" },
+  { id: "sky", label: "Sky", hex: "#8ecae6" },
+  { id: "sage", label: "Sage", hex: "#8fbf8f" },
+  { id: "ivory", label: "Ivory", hex: "#ffffff" },
+];
 
 export default function CreatePrayerPage() {
   const router = useRouter();
@@ -15,6 +54,8 @@ export default function CreatePrayerPage() {
   const [occasion, setOccasion] = useState("");
   const [styles, setStyles] = useState<Style[]>([]);
   const [selectedStyleId, setSelectedStyleId] = useState<string | null>(null);
+  const [textStyle, setTextStyle] = useState<TextStyle>("calligraphy");
+  const [accentColor, setAccentColor] = useState<AccentColor>("gold");
 
   const [recordingState, setRecordingState] = useState<RecordingState>("idle");
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
@@ -106,6 +147,8 @@ export default function CreatePrayerPage() {
           recipient_name: recipientName || null,
           occasion: occasion || null,
           style_id: selectedStyleId,
+          text_style: textStyle,
+          accent_color: accentColor,
           privacy: "private",
         })
         .select()
@@ -252,6 +295,62 @@ export default function CreatePrayerPage() {
           </div>
         </section>
       )}
+
+      <section className="flex flex-col gap-3">
+        <p className="text-sm font-medium">Text style</p>
+        <div className="grid grid-cols-3 gap-3">
+          {TEXT_STYLE_OPTIONS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => setTextStyle(option.id)}
+              className={`flex flex-col items-center justify-center gap-1 rounded-lg border px-3 py-4 transition ${
+                textStyle === option.id
+                  ? "border-neutral-900 bg-neutral-900"
+                  : "border-neutral-300 hover:bg-neutral-50"
+              }`}
+            >
+              <span
+                className={`text-2xl leading-tight ${
+                  textStyle === option.id ? "text-white" : "text-neutral-900"
+                }`}
+                style={{ fontFamily: option.fontVar }}
+              >
+                {option.sample}
+              </span>
+              <span
+                className={`text-xs ${
+                  textStyle === option.id ? "text-neutral-300" : "text-neutral-500"
+                }`}
+              >
+                {option.label}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        <p className="mt-2 text-sm font-medium">Accent color</p>
+        <div className="flex gap-3">
+          {ACCENT_COLOR_OPTIONS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => setAccentColor(option.id)}
+              title={option.label}
+              aria-label={option.label}
+              className={`h-9 w-9 rounded-full border-2 transition ${
+                accentColor === option.id
+                  ? "border-neutral-900 ring-2 ring-offset-2 ring-neutral-900"
+                  : "border-neutral-300"
+              }`}
+              style={{ backgroundColor: option.hex }}
+            />
+          ))}
+        </div>
+        <p className="text-xs text-neutral-400">
+          Applied to the title in your video and its thumbnail.
+        </p>
+      </section>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 

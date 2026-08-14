@@ -54,6 +54,17 @@ const FONT_SERIF = path.join(
   import.meta.dirname,
   "fonts/PlayfairDisplay-Regular.ttf"
 );
+// Text-style presets (Sprint 3.8) — chosen by the user on the create page
+// before rendering, so the title (both in-video and on the thumbnail) can
+// look intentional rather than always defaulting to the calligraphy look.
+const FONT_MODERN = path.join(
+  import.meta.dirname,
+  "fonts/Montserrat-ExtraBold.ttf"
+);
+const FONT_HANDWRITTEN = path.join(
+  import.meta.dirname,
+  "fonts/Caveat-Bold.ttf"
+);
 
 // Procedural background theme per style — no stock assets required.
 const STYLE_THEMES = {
@@ -65,6 +76,48 @@ const STYLE_THEMES = {
   peaceful: { bg: "0x24425c", text: "white", accent: "0xf5c451" },
 };
 const DEFAULT_THEME = { bg: "0x2f4a3e", text: "white", accent: "0xf5c451" };
+
+// Title font per text style, plus the sizing/wrapping each font needs to
+// look right — Caveat and Montserrat read very differently from the
+// calligraphy script at the same pixel size, so each preset tunes its own.
+const TEXT_STYLES = {
+  calligraphy: {
+    font: FONT_CALLIGRAPHY,
+    videoFontSize: 60,
+    videoWrapChars: 22,
+    thumbFontSize: 70,
+    thumbWrapChars: 20,
+    uppercase: false,
+  },
+  modern: {
+    font: FONT_MODERN,
+    videoFontSize: 44,
+    videoWrapChars: 16,
+    thumbFontSize: 48,
+    thumbWrapChars: 15,
+    uppercase: true,
+  },
+  handwritten: {
+    font: FONT_HANDWRITTEN,
+    videoFontSize: 66,
+    videoWrapChars: 20,
+    thumbFontSize: 76,
+    thumbWrapChars: 18,
+    uppercase: false,
+  },
+};
+const DEFAULT_TEXT_STYLE = TEXT_STYLES.calligraphy;
+
+// Accent color choices offered on the create page — applied to the title in
+// both the video and its thumbnail. Curated (rather than a free color
+// picker) so every combination still reads clearly against every theme.
+const ACCENT_COLORS = {
+  gold: "0xf5c451",
+  rose: "0xe98a9c",
+  sky: "0x8ecae6",
+  sage: "0x8fbf8f",
+  ivory: "0xffffff",
+};
 
 // Railway sends SIGTERM to the old container during a rolling deploy and
 // expects it to exit. Without a handler, Node's default SIGTERM behavior
@@ -145,7 +198,7 @@ async function renderPrayer(job, workDir) {
   const { data: prayer, error: prayerError } = await supabase
     .from("prayers")
     .select(
-      "id, user_id, title, recipient_name, transcript, captions, word_timings, style_id"
+      "id, user_id, title, recipient_name, transcript, captions, word_timings, style_id, text_style, accent_color"
     )
     .eq("id", job.prayer_id)
     .single();
@@ -171,6 +224,8 @@ async function renderPrayer(job, workDir) {
   }
   const theme =
     STYLE_THEMES[(styleName ?? "").toLowerCase()] ?? DEFAULT_THEME;
+  const textStyle = TEXT_STYLES[prayer.text_style] ?? DEFAULT_TEXT_STYLE;
+  const accentColor = ACCENT_COLORS[prayer.accent_color] ?? theme.accent;
 
   const { data: audioAsset, error: audioError } = await supabase
     .from("media_assets")
@@ -200,12 +255,15 @@ async function renderPrayer(job, workDir) {
     prayer.title ||
     (prayer.recipient_name ? `A Prayer for ${prayer.recipient_name}` : "A Prayer");
   const titlePath = path.join(workDir, "title.txt");
+  const displayTitle = textStyle.uppercase ? title.toUpperCase() : title;
   // Long titles at fontsize 64 easily exceed the 1080px frame width, which
   // pushes drawtext's centering x=(w-text_w)/2 negative and clips both
   // edges (seen in production — "Abundance Flows Through Your Work" only
   // showed "ndance Flows Through Your W"). Wrap greedily onto multiple
-  // centered lines instead of shrinking to illegibility.
-  await writeFile(titlePath, wrapText(title, 22), "utf8");
+  // centered lines instead of shrinking to illegibility. The wrap width is
+  // per text-style since each title font has a different average glyph
+  // width at its own font size.
+  await writeFile(titlePath, wrapText(displayTitle, textStyle.videoWrapChars), "utf8");
 
   const captions = Array.isArray(prayer.captions) ? prayer.captions : [];
   const captionFiles = [];
@@ -262,6 +320,8 @@ async function renderPrayer(job, workDir) {
   const outputPath = path.join(workDir, "output.mp4");
   const filterComplex = buildFilterComplex({
     theme,
+    textStyle,
+    accentColor,
     titlePath,
     captionFiles,
     wordFiles,
@@ -332,7 +392,9 @@ async function renderPrayer(job, workDir) {
   await generateThumbnail({
     workDir,
     theme,
-    title,
+    textStyle,
+    accentColor,
+    title: displayTitle,
     transcript: prayer.transcript ?? "",
     backgroundVideoPath,
     outputPath: thumbnailPath,
@@ -429,13 +491,15 @@ async function renderPrayer(job, workDir) {
 async function generateThumbnail({
   workDir,
   theme,
+  textStyle,
+  accentColor,
   title,
   transcript,
   backgroundVideoPath,
   outputPath,
 }) {
   const titleLinesPath = path.join(workDir, "thumb-title.txt");
-  await writeFile(titleLinesPath, wrapText(title, 20), "utf8");
+  await writeFile(titleLinesPath, wrapText(title, textStyle.thumbWrapChars), "utf8");
 
   const bodyLinesPath = path.join(workDir, "thumb-body.txt");
   await writeFile(
@@ -456,7 +520,7 @@ async function generateThumbnail({
   }
   filters.push(`drawbox=x=0:y=440:w=1080:h=1040:color=${scrimColor}:t=fill`);
   filters.push(
-    `drawtext=textfile='${titleLinesPath}':fontfile='${FONT_CALLIGRAPHY}':fontsize=70:fontcolor=${theme.accent}:line_spacing=6:x=(w-text_w)/2:y=530`
+    `drawtext=textfile='${titleLinesPath}':fontfile='${textStyle.font}':fontsize=${textStyle.thumbFontSize}:fontcolor=${accentColor}:line_spacing=6:x=(w-text_w)/2:y=530`
   );
   filters.push(
     `drawtext=textfile='${bodyLinesPath}':fontfile='${FONT_SERIF}':fontsize=40:fontcolor=${theme.text}:line_spacing=20:x=(w-text_w)/2:y=830`
@@ -498,6 +562,8 @@ function truncateForThumbnail(text, maxChars) {
  */
 function buildFilterComplex({
   theme,
+  textStyle,
+  accentColor,
   titlePath,
   captionFiles,
   wordFiles = [],
@@ -521,8 +587,11 @@ function buildFilterComplex({
 
   let nextLabel = "v0";
 
+  // Title uses the user's chosen text-style font + accent color (Sprint
+  // 3.8) so the video and its own thumbnail look like a matched set instead
+  // of the thumbnail being the only "designed" part.
   filters.push(
-    `[${currentLabel}]drawtext=textfile='${titlePath}':fontfile='${FONT_BOLD}':fontsize=64:fontcolor=${theme.text}:` +
+    `[${currentLabel}]drawtext=textfile='${titlePath}':fontfile='${textStyle.font}':fontsize=${textStyle.videoFontSize}:fontcolor=${accentColor}:` +
       `x=(w-text_w)/2:y=140:line_spacing=10[${nextLabel}]`
   );
   currentLabel = nextLabel;

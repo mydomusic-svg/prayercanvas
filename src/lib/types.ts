@@ -2,6 +2,10 @@ export type Privacy = "private" | "unlisted" | "public";
 
 export type RenderStatus = "pending" | "processing" | "complete" | "failed";
 
+export type TextStyle = "calligraphy" | "modern" | "handwritten";
+
+export type AccentColor = "gold" | "rose" | "sky" | "sage" | "ivory";
+
 export interface CaptionSegment {
   text: string;
   start: number;
@@ -25,6 +29,8 @@ export interface Prayer {
   captions: CaptionSegment[] | null;
   word_timings: WordTiming[] | null;
   style_id: string | null;
+  text_style: TextStyle;
+  accent_color: AccentColor | null;
   privacy: Privacy;
   created_at: string;
 }
