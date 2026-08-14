@@ -7,10 +7,11 @@
 //   3. muxes the original voice recording as the audio track
 //   4. uploads the finished MP4 to Supabase Storage and marks the job complete
 //
-// No external stock footage or music is used — the background is generated
-// procedurally with ffmpeg (solid color + vignette) so there's nothing to
-// license or source. Swapping in real background loops / music beds per
-// style is a natural follow-up once you have licensed assets to drop in.
+// Background video + music per style come from the `styles` table
+// (visual_asset / music_asset columns), seeded by scripts/seed-style-assets.mjs
+// with real licensed clips (Pexels video, incompetech.com music — see
+// /credits in the app). Falls back to a procedural solid-color background
+// and no music bed for any style that hasn't been seeded yet.
 //
 // Required env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 // Optional: POLL_INTERVAL_MS (default 5000)
@@ -116,13 +117,20 @@ async function renderPrayer(job, workDir) {
   }
 
   let styleName = null;
+  let visualAssetUrl = null;
+  let musicAssetUrl = null;
   if (prayer.style_id) {
     const { data: style } = await supabase
       .from("styles")
-      .select("name")
+      .select("name, visual_asset, music_asset")
       .eq("id", prayer.style_id)
       .maybeSingle();
     styleName = style?.name ?? null;
+    // Only real uploaded assets are usable — 0001_init.sql seeds these
+    // columns with placeholder filenames (e.g. "nature-loop.mp4") until
+    // scripts/seed-style-assets.mjs replaces them with real Storage URLs.
+    if (style?.visual_asset?.startsWith("http")) visualAssetUrl = style.visual_asset;
+    if (style?.music_asset?.startsWith("http")) musicAssetUrl = style.music_asset;
   }
   const theme =
     STYLE_THEMES[(styleName ?? "").toLowerCase()] ?? DEFAULT_THEME;
@@ -165,23 +173,54 @@ async function renderPrayer(job, workDir) {
     captionFiles.push({ path: capPath, start: captions[i].start, end: captions[i].end });
   }
 
+  // Download the real background video / music for this style, if the
+  // `styles` row has been seeded with them (see scripts/seed-style-assets.mjs).
+  // Falls back to the Sprint 3 procedural solid-color background and no
+  // music bed when a style hasn't been seeded yet.
+  let backgroundVideoPath = null;
+  if (visualAssetUrl) {
+    backgroundVideoPath = path.join(workDir, "background.mp4");
+    await downloadFile(visualAssetUrl, backgroundVideoPath);
+  }
+  let musicPath = null;
+  if (musicAssetUrl) {
+    musicPath = path.join(workDir, "music.mp3");
+    await downloadFile(musicAssetUrl, musicPath);
+  }
+
+  await updateJob(job.id, { progress: 40 });
+
   const outputPath = path.join(workDir, "output.mp4");
   const filterComplex = buildFilterComplex({
     theme,
     titlePath,
     captionFiles,
+    hasBackgroundVideo: Boolean(backgroundVideoPath),
+    hasMusic: Boolean(musicPath),
   });
 
   await updateJob(job.id, { progress: 45 });
 
+  const inputArgs = backgroundVideoPath
+    ? // Loop the clip indefinitely and cut it to the voice audio's length —
+      // real clips (5-20s) are almost always shorter than a full prayer.
+      ["-stream_loop", "-1", "-i", backgroundVideoPath, "-t", duration.toFixed(2)]
+    : ["-f", "lavfi", "-i", `color=c=${theme.bg}:s=1080x1920:d=${duration.toFixed(2)}:r=30`];
+
+  const audioInputArgs = ["-i", audioPath];
+  if (musicPath) {
+    // Loop the music bed too, ducked under the voice via the volume filter
+    // in buildFilterComplex rather than here.
+    audioInputArgs.push("-stream_loop", "-1", "-i", musicPath, "-t", duration.toFixed(2));
+  }
+
   await execFileAsync("ffmpeg", [
     "-y",
-    "-f", "lavfi",
-    "-i", `color=c=${theme.bg}:s=1080x1920:d=${duration.toFixed(2)}:r=30`,
-    "-i", audioPath,
+    ...inputArgs,
+    ...audioInputArgs,
     "-filter_complex", filterComplex,
     "-map", "[vfinal]",
-    "-map", "1:a",
+    "-map", "[aout]",
     "-c:v", "libx264",
     "-preset", "veryfast",
     "-pix_fmt", "yuv420p",
@@ -233,9 +272,28 @@ async function renderPrayer(job, workDir) {
  * generated background, using textfile= so we never have to hand-escape
  * arbitrary prayer text for ffmpeg's filter syntax.
  */
-function buildFilterComplex({ theme, titlePath, captionFiles }) {
+function buildFilterComplex({
+  theme,
+  titlePath,
+  captionFiles,
+  hasBackgroundVideo = false,
+  hasMusic = false,
+}) {
   const filters = [];
   let currentLabel = "0:v";
+
+  // Real clips come in whatever aspect ratio Pexels shipped them in — scale
+  // to fill a 1080x1920 frame and center-crop the rest, same treatment a
+  // portrait-video editor would apply. The lavfi color fallback is already
+  // exactly 1080x1920, so it skips this step.
+  if (hasBackgroundVideo) {
+    filters.push(
+      `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,` +
+        `crop=1080:1920,setsar=1,fps=30[bg]`
+    );
+    currentLabel = "bg";
+  }
+
   let nextLabel = "v0";
 
   filters.push(
@@ -259,6 +317,21 @@ function buildFilterComplex({ theme, titlePath, captionFiles }) {
     /\[[^[\]]+\]$/,
     "[vfinal]"
   );
+
+  // Audio: voice is input 1 always. Music, when present, is input 2 — duck
+  // it well under the voice (18%) and mix rather than replace, so the
+  // prayer itself always stays clearly audible.
+  if (hasMusic) {
+    filters.push(`[2:a]volume=0.18[music]`);
+    // normalize=0: amix defaults to auto-scaling every input down by 1/N,
+    // which would quietly halve the voice track on top of our explicit
+    // music duck above — disable that so only our 0.18 ducking applies.
+    filters.push(
+      `[1:a][music]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[aout]`
+    );
+  } else {
+    filters.push(`[1:a]anull[aout]`);
+  }
 
   return filters.join(";");
 }
