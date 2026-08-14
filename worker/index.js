@@ -168,7 +168,12 @@ async function renderPrayer(job, workDir) {
     prayer.title ||
     (prayer.recipient_name ? `A Prayer for ${prayer.recipient_name}` : "A Prayer");
   const titlePath = path.join(workDir, "title.txt");
-  await writeFile(titlePath, title, "utf8");
+  // Long titles at fontsize 64 easily exceed the 1080px frame width, which
+  // pushes drawtext's centering x=(w-text_w)/2 negative and clips both
+  // edges (seen in production — "Abundance Flows Through Your Work" only
+  // showed "ndance Flows Through Your W"). Wrap greedily onto multiple
+  // centered lines instead of shrinking to illegibility.
+  await writeFile(titlePath, wrapText(title, 22), "utf8");
 
   const captions = Array.isArray(prayer.captions) ? prayer.captions : [];
   const captionFiles = [];
@@ -287,7 +292,14 @@ async function renderPrayer(job, workDir) {
   await updateJob(job.id, { progress: 80 });
 
   const outputBuffer = await readFile(outputPath);
-  const storagePath = `${prayer.user_id}/${prayer.id}/render.mp4`;
+  // Every render used the exact same storage path before, so the browser
+  // (and any CDN in front of Supabase Storage) could keep serving a
+  // cached copy of an OLD render under an identical URL — this is a very
+  // plausible explanation for "the video looked different/broken on
+  // replay" reports even after we fixed the underlying code. Including the
+  // job id makes every render's URL unique, so there's nothing stale to
+  // ever be served.
+  const storagePath = `${prayer.user_id}/${prayer.id}/render-${job.id}.mp4`;
 
   const { error: uploadError } = await supabase.storage
     .from(VIDEO_BUCKET)
@@ -370,7 +382,7 @@ function buildFilterComplex({
       filters.push(
         `[${currentLabel}]drawtext=textfile='${word.path}':fontfile='${FONT_BOLD}':fontsize=58:fontcolor=white:` +
           `box=1:boxcolor=0xf5b301@0.85:boxborderw=18:` +
-          `x=(w-text_w)/2:y=h-380:enable='between(t,${word.start},${word.end})'[${nextLabel}]`
+          `x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${word.start},${word.end})'[${nextLabel}]`
       );
       currentLabel = nextLabel;
     });
@@ -408,6 +420,28 @@ function buildFilterComplex({
   }
 
   return filters.join(";");
+}
+
+/**
+ * Greedy word-wrap for drawtext (which never wraps on its own). Keeps each
+ * line under maxCharsPerLine where possible; a single word longer than the
+ * limit is left intact on its own line rather than being split mid-word.
+ */
+function wrapText(text, maxCharsPerLine) {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines = [];
+  let current = "";
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length > maxCharsPerLine && current) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.join("\n");
 }
 
 async function downloadFile(url, destPath) {
