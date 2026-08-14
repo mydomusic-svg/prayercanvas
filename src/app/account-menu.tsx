@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import DeleteAccountModal from "./delete-account-modal";
 
 // There was previously no sign-out control anywhere in the app — closing
 // the tab was the only way to end a session. This is a small dropdown off
@@ -12,6 +13,7 @@ export default function AccountMenu({ email }: { email: string | null }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -54,7 +56,19 @@ export default function AccountMenu({ email }: { email: string | null }) {
           >
             {signingOut ? "Signing out…" : "Sign out"}
           </button>
+          <button
+            onClick={() => {
+              setOpen(false);
+              setShowDeleteModal(true);
+            }}
+            className="w-full rounded-md px-3 py-1.5 text-left text-sm text-red-600 transition hover:bg-red-50"
+          >
+            Delete account
+          </button>
         </div>
+      )}
+      {showDeleteModal && (
+        <DeleteAccountModal onClose={() => setShowDeleteModal(false)} />
       )}
     </div>
   );
