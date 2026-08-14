@@ -177,18 +177,16 @@ export default function CreatePrayerPage() {
 
       if (assetError) throw assetError;
 
-      // 4. Kick off a render job. A worker (see README / Sprint 2-3) picks
-      //    this up, transcribes it, and renders the final video.
-      const { error: jobError } = await supabase.from("render_jobs").insert({
-        prayer_id: prayer.id,
-        status: "pending",
-      });
-
-      if (jobError) throw jobError;
-
-      // 5. Kick off transcription + theme detection (Sprint 2). Best-effort —
-      //    if it fails (e.g. missing API keys), the prayer still exists and
-      //    can be retried from its detail page.
+      // 4. Kick off transcription + theme detection (Sprint 2). The render
+      //    job itself is created server-side by this route, ONLY after
+      //    transcript/captions/word_timings/title are all written — NOT
+      //    here. Creating it here (as this used to) raced the render
+      //    worker's ~5s poll loop against transcription, which routinely
+      //    takes longer than that: the worker would grab the job and
+      //    render before processing finished, producing a video with the
+      //    fallback title and no captions at all. Best-effort — if this
+      //    fails (e.g. missing API keys), the prayer still exists and can
+      //    be retried from its detail page, which also queues the render.
       setProcessing(true);
       try {
         await fetch(`/api/prayers/${prayer.id}/process`, { method: "POST" });

@@ -85,6 +85,22 @@ export async function POST(
 
     if (updateError) throw updateError;
 
+    // Only queue the render job now that transcript/captions/word_timings/
+    // title are all written. This used to be inserted by the create page
+    // right after upload, before processing even started — the render
+    // worker's ~5s poll loop routinely won that race against transcription
+    // (which for real audio almost always takes longer than 5s), so the
+    // worker would render against an empty prayer row: fallback title only,
+    // no captions, no word-highlighting. Creating the job here instead
+    // guarantees the worker only ever sees a fully-processed prayer.
+    const { error: jobError } = await supabase.from("render_jobs").insert({
+      prayer_id: id,
+      status: "pending",
+    });
+    if (jobError) {
+      console.error("Failed to queue render job after processing:", jobError.message);
+    }
+
     return NextResponse.json({ transcript, theme, title, captions: segments, words });
   } catch (err) {
     console.error("Prayer processing failed:", err);
