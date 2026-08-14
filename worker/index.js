@@ -3,7 +3,10 @@
 // Polls Supabase for pending render_jobs, and for each one:
 //   1. downloads the prayer's raw audio
 //   2. generates a vertical background video themed by the chosen style,
-//      with the title and Whisper-timed captions (from Sprint 2) burned in
+//      with the title and Whisper-timed captions burned in — highlighting
+//      one word at a time in sync with the speech (Sprint 3.6) when
+//      word-level timestamps are available, falling back to whole-sentence
+//      captions (Sprint 2) for older prayers that don't have them
 //   3. muxes the original voice recording as the audio track
 //   4. uploads the finished MP4 to Supabase Storage and marks the job complete
 //
@@ -109,7 +112,7 @@ async function processNextJob() {
 async function renderPrayer(job, workDir) {
   const { data: prayer, error: prayerError } = await supabase
     .from("prayers")
-    .select("id, user_id, title, recipient_name, captions, style_id")
+    .select("id, user_id, title, recipient_name, captions, word_timings, style_id")
     .eq("id", job.prayer_id)
     .single();
   if (prayerError || !prayer) {
@@ -173,6 +176,19 @@ async function renderPrayer(job, workDir) {
     captionFiles.push({ path: capPath, start: captions[i].start, end: captions[i].end });
   }
 
+  // Word-level timestamps (Sprint 3.6) let us highlight the exact word being
+  // spoken, karaoke-style, instead of just showing a whole sentence at once.
+  // Older prayers rendered before this feature won't have word_timings —
+  // buildFilterComplex falls back to the plain per-segment captions above
+  // when this array is empty.
+  const words = Array.isArray(prayer.word_timings) ? prayer.word_timings : [];
+  const wordFiles = [];
+  for (let i = 0; i < words.length; i++) {
+    const wordPath = path.join(workDir, `word-${i}.txt`);
+    await writeFile(wordPath, (words[i].word ?? "").trim(), "utf8");
+    wordFiles.push({ path: wordPath, start: words[i].start, end: words[i].end });
+  }
+
   // Download the real background video / music for this style, if the
   // `styles` row has been seeded with them (see scripts/seed-style-assets.mjs).
   // Falls back to the Sprint 3 procedural solid-color background and no
@@ -195,6 +211,7 @@ async function renderPrayer(job, workDir) {
     theme,
     titlePath,
     captionFiles,
+    wordFiles,
     hasBackgroundVideo: Boolean(backgroundVideoPath),
     hasMusic: Boolean(musicPath),
   });
@@ -276,6 +293,7 @@ function buildFilterComplex({
   theme,
   titlePath,
   captionFiles,
+  wordFiles = [],
   hasBackgroundVideo = false,
   hasMusic = false,
 }) {
@@ -302,14 +320,33 @@ function buildFilterComplex({
   );
   currentLabel = nextLabel;
 
-  captionFiles.forEach((cap, i) => {
-    nextLabel = `v${i + 1}`;
-    filters.push(
-      `[${currentLabel}]drawtext=textfile='${cap.path}':fontfile='${FONT_REGULAR}':fontsize=48:fontcolor=${theme.text}:` +
-        `x=(w-text_w)/2:y=h-380:enable='between(t,${cap.start},${cap.end})'[${nextLabel}]`
-    );
-    currentLabel = nextLabel;
-  });
+  // Prefer word-level highlighting (Sprint 3.6): one word on screen at a
+  // time, in a gold highlight box, exactly timed to Whisper's per-word
+  // timestamps — the caption tracks the speech instead of showing a whole
+  // sentence at once. The box also guarantees contrast against real stock
+  // footage backgrounds, which vary a lot in brightness. Older prayers
+  // rendered before word_timings existed fall back to the plain per-segment
+  // caption line.
+  if (wordFiles.length > 0) {
+    wordFiles.forEach((word, i) => {
+      nextLabel = `v${i + 1}`;
+      filters.push(
+        `[${currentLabel}]drawtext=textfile='${word.path}':fontfile='${FONT_BOLD}':fontsize=58:fontcolor=white:` +
+          `box=1:boxcolor=0xf5b301@0.85:boxborderw=18:` +
+          `x=(w-text_w)/2:y=h-380:enable='between(t,${word.start},${word.end})'[${nextLabel}]`
+      );
+      currentLabel = nextLabel;
+    });
+  } else {
+    captionFiles.forEach((cap, i) => {
+      nextLabel = `v${i + 1}`;
+      filters.push(
+        `[${currentLabel}]drawtext=textfile='${cap.path}':fontfile='${FONT_REGULAR}':fontsize=48:fontcolor=${theme.text}:` +
+          `x=(w-text_w)/2:y=h-380:enable='between(t,${cap.start},${cap.end})'[${nextLabel}]`
+      );
+      currentLabel = nextLabel;
+    });
+  }
 
   // Rename the last stage's output to the fixed label we map from.
   const lastFilterIndex = filters.length - 1;

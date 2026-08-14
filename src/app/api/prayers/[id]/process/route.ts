@@ -57,7 +57,7 @@ export async function POST(
     }
     const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
 
-    const { text: transcript, segments } = await transcribeAudio(audioBuffer);
+    const { text: transcript, segments, words } = await transcribeAudio(audioBuffer);
 
     if (!transcript.trim()) {
       throw new Error(
@@ -73,12 +73,12 @@ export async function POST(
 
     const { error: updateError } = await supabase
       .from("prayers")
-      .update({ transcript, theme, title, captions: segments })
+      .update({ transcript, theme, title, captions: segments, word_timings: words })
       .eq("id", id);
 
     if (updateError) throw updateError;
 
-    return NextResponse.json({ transcript, theme, title, captions: segments });
+    return NextResponse.json({ transcript, theme, title, captions: segments, words });
   } catch (err) {
     console.error("Prayer processing failed:", err);
     return NextResponse.json(

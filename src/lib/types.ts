@@ -8,6 +8,12 @@ export interface CaptionSegment {
   end: number;
 }
 
+export interface WordTiming {
+  word: string;
+  start: number;
+  end: number;
+}
+
 export interface Prayer {
   id: string;
   user_id: string;
@@ -17,6 +23,7 @@ export interface Prayer {
   transcript: string | null;
   theme: string | null;
   captions: CaptionSegment[] | null;
+  word_timings: WordTiming[] | null;
   style_id: string | null;
   privacy: Privacy;
   created_at: string;

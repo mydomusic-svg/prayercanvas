@@ -7,11 +7,20 @@ export interface CaptionSegment {
   end: number;
 }
 
+export interface WordTiming {
+  word: string;
+  start: number;
+  end: number;
+}
+
 export interface TranscriptionResult {
   text: string;
   /** Segment-level timestamps from Whisper — used as caption chunks in the
    * rendered video (Sprint 3), so we don't have to guess timing ourselves. */
   segments: CaptionSegment[];
+  /** Word-level timestamps — lets the render worker highlight the exact word
+   * being spoken as the prayer plays (Sprint 3.6). */
+  words: WordTiming[];
 }
 
 /**
@@ -35,13 +44,18 @@ export async function transcribeAudio(
     file,
     model: "whisper-1",
     response_format: "verbose_json",
+    // Word-level granularity is what lets us highlight the exact word being
+    // spoken; segment-level is kept too for the transcript/captions view.
+    timestamp_granularities: ["segment", "word"],
   });
 
   // The SDK's base type only guarantees `text`; verbose_json also returns
-  // per-segment timestamps that aren't in the narrow response type.
+  // per-segment and (with timestamp_granularities) per-word timestamps that
+  // aren't in the narrow response type.
   const raw = result as unknown as {
     text: string;
     segments?: { text: string; start: number; end: number }[];
+    words?: { word: string; start: number; end: number }[];
   };
 
   return {
@@ -50,6 +64,11 @@ export async function transcribeAudio(
       text: s.text.trim(),
       start: s.start,
       end: s.end,
+    })),
+    words: (raw.words ?? []).map((w) => ({
+      word: w.word,
+      start: w.start,
+      end: w.end,
     })),
   };
 }
