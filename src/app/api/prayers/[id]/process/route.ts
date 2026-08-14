@@ -65,6 +65,13 @@ export async function POST(
       );
     }
 
+    // Diagnostic: word-level timestamps have been coming back empty for very
+    // short recordings — logging counts here so we can confirm whether audio
+    // length is the cause without re-deploying each time we want to check.
+    console.log(
+      `Whisper: ${segments.length} segment(s), ${words.length} word(s) for a ${audioBuffer.byteLength}-byte clip.`
+    );
+
     const { theme, title } = await analyzePrayer({
       transcript,
       recipientName: prayer.recipient_name,
