@@ -95,6 +95,7 @@ export default async function PrayerDetailPage({
           <div className="mt-3 flex flex-col gap-3">
             <video
               src={renderJob.output_url}
+              poster={renderJob.thumbnail_url ?? undefined}
               controls
               className="w-full rounded-lg"
             />

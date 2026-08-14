@@ -28,7 +28,7 @@ export default async function SharedPrayerPage({
 
   const { data: renderJob } = await supabase
     .from("render_jobs")
-    .select("output_url, status")
+    .select("output_url, thumbnail_url, status")
     .eq("prayer_id", shareLink.prayer_id)
     .eq("status", "complete")
     .order("created_at", { ascending: false })
@@ -52,6 +52,7 @@ export default async function SharedPrayerPage({
       {renderJob?.output_url ? (
         <video
           src={renderJob.output_url}
+          poster={renderJob.thumbnail_url ?? undefined}
           controls
           autoPlay
           className="w-full rounded-xl"

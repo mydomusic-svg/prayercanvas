@@ -44,23 +44,53 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 const FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
 const FONT_REGULAR = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+// Bundled (not from apt — see worker/fonts/) so the thumbnail can look like
+// an actual designed prayer card instead of the plain DejaVu captions.
+const FONT_CALLIGRAPHY = path.join(
+  import.meta.dirname,
+  "fonts/GreatVibes-Regular.ttf"
+);
+const FONT_SERIF = path.join(
+  import.meta.dirname,
+  "fonts/PlayfairDisplay-Regular.ttf"
+);
 
 // Procedural background theme per style — no stock assets required.
 const STYLE_THEMES = {
-  nature: { bg: "0x2f4a3e", text: "white" },
-  cinematic: { bg: "0x161616", text: "white" },
-  minimal: { bg: "0xf5f5f0", text: "black" },
-  celebration: { bg: "0xb5482a", text: "white" },
-  scripture: { bg: "0x2e1f47", text: "white" },
-  peaceful: { bg: "0x24425c", text: "white" },
+  nature: { bg: "0x2f4a3e", text: "white", accent: "0xf5c451" },
+  cinematic: { bg: "0x161616", text: "white", accent: "0xf5c451" },
+  minimal: { bg: "0xf5f5f0", text: "black", accent: "0x9c6b12" },
+  celebration: { bg: "0xb5482a", text: "white", accent: "0xffe066" },
+  scripture: { bg: "0x2e1f47", text: "white", accent: "0xf5c451" },
+  peaceful: { bg: "0x24425c", text: "white", accent: "0xf5c451" },
 };
-const DEFAULT_THEME = { bg: "0x2f4a3e", text: "white" };
+const DEFAULT_THEME = { bg: "0x2f4a3e", text: "white", accent: "0xf5c451" };
+
+// Railway sends SIGTERM to the old container during a rolling deploy and
+// expects it to exit. Without a handler, Node's default SIGTERM behavior
+// SHOULD terminate the process — but if that's ever swallowed (e.g. by a
+// dangling async operation keeping the event loop alive), an old-code
+// container can keep polling forever, racing the new container for the
+// same jobs and non-deterministically processing some of them with stale
+// code. Handling the signal explicitly and forcing an exit removes any
+// ambiguity — this is likely the reason fixes have appeared to
+// "intermittently" not take effect even after a clean, correct redeploy.
+let shuttingDown = false;
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`Received ${signal}, shutting down.`);
+  process.exit(0);
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
 
 async function main() {
   console.log(
     "PrayerCanvas render worker started. [build: word-caption-min-duration-v1]"
   );
   for (;;) {
+    if (shuttingDown) return;
     let handled = false;
     try {
       handled = await processNextJob();
@@ -114,7 +144,9 @@ async function processNextJob() {
 async function renderPrayer(job, workDir) {
   const { data: prayer, error: prayerError } = await supabase
     .from("prayers")
-    .select("id, user_id, title, recipient_name, captions, word_timings, style_id")
+    .select(
+      "id, user_id, title, recipient_name, transcript, captions, word_timings, style_id"
+    )
     .eq("id", job.prayer_id)
     .single();
   if (prayerError || !prayer) {
@@ -289,6 +321,23 @@ async function renderPrayer(job, workDir) {
     throw ffmpegErr;
   }
 
+  await updateJob(job.id, { progress: 75 });
+
+  // Thumbnail (poster image): a single still frame from the same background,
+  // with the title in a calligraphy accent font and the prayer text in a
+  // readable serif underneath a dark/light scrim — so the prayer can be read
+  // without pressing play, and the video's own artwork carries into the
+  // thumbnail instead of a generic placeholder frame.
+  const thumbnailPath = path.join(workDir, "thumbnail.jpg");
+  await generateThumbnail({
+    workDir,
+    theme,
+    title,
+    transcript: prayer.transcript ?? "",
+    backgroundVideoPath,
+    outputPath: thumbnailPath,
+  });
+
   await updateJob(job.id, { progress: 80 });
 
   const outputBuffer = await readFile(outputPath);
@@ -315,6 +364,27 @@ async function renderPrayer(job, workDir) {
     .from(VIDEO_BUCKET)
     .getPublicUrl(storagePath);
 
+  const thumbnailBuffer = await readFile(thumbnailPath);
+  const thumbnailStoragePath = `${prayer.user_id}/${prayer.id}/thumbnail-${job.id}.jpg`;
+  const { error: thumbnailUploadError } = await supabase.storage
+    .from(VIDEO_BUCKET)
+    .upload(thumbnailStoragePath, thumbnailBuffer, {
+      contentType: "image/jpeg",
+      upsert: true,
+    });
+  // A broken thumbnail shouldn't fail an otherwise-successful render — log
+  // and continue without one rather than throwing.
+  let thumbnailUrl = null;
+  if (thumbnailUploadError) {
+    console.error(
+      `Render job ${job.id}: thumbnail upload failed: ${thumbnailUploadError.message}`
+    );
+  } else {
+    thumbnailUrl = supabase.storage
+      .from(VIDEO_BUCKET)
+      .getPublicUrl(thumbnailStoragePath).data.publicUrl;
+  }
+
   await supabase.from("media_assets").insert({
     prayer_id: prayer.id,
     type: "rendered_video",
@@ -326,10 +396,82 @@ async function renderPrayer(job, workDir) {
     status: "complete",
     progress: 100,
     output_url: publicUrlData.publicUrl,
+    thumbnail_url: thumbnailUrl,
     completed_at: new Date().toISOString(),
   });
 
   console.log(`Render job ${job.id} complete: ${publicUrlData.publicUrl}`);
+}
+
+/**
+ * Renders a single still-frame JPEG "poster" for the prayer: a frame from
+ * the same background art (or theme color, for styles without real footage)
+ * with the title in a calligraphy accent font and the prayer text in a
+ * readable serif underneath a scrim, so the video is legible without
+ * pressing play.
+ */
+async function generateThumbnail({
+  workDir,
+  theme,
+  title,
+  transcript,
+  backgroundVideoPath,
+  outputPath,
+}) {
+  const titleLinesPath = path.join(workDir, "thumb-title.txt");
+  await writeFile(titleLinesPath, wrapText(title, 16), "utf8");
+
+  const bodyLinesPath = path.join(workDir, "thumb-body.txt");
+  await writeFile(
+    bodyLinesPath,
+    wrapText(truncateForThumbnail(transcript, 260), 30),
+    "utf8"
+  );
+
+  // Light themes (e.g. "Minimal") need a light scrim so the dark accent/body
+  // text stays readable; dark themes need a dark scrim under white text.
+  const scrimColor = theme.text === "black" ? "white@0.6" : "black@0.42";
+
+  const filters = [];
+  if (backgroundVideoPath) {
+    filters.push(
+      "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1"
+    );
+  }
+  filters.push(`drawbox=x=0:y=440:w=1080:h=1040:color=${scrimColor}:t=fill`);
+  filters.push(
+    `drawtext=textfile='${titleLinesPath}':fontfile='${FONT_CALLIGRAPHY}':fontsize=74:fontcolor=${theme.accent}:line_spacing=8:x=(w-text_w)/2:y=530`
+  );
+  filters.push(
+    `drawtext=textfile='${bodyLinesPath}':fontfile='${FONT_SERIF}':fontsize=40:fontcolor=${theme.text}:line_spacing=20:x=(w-text_w)/2:y=790`
+  );
+
+  const inputArgs = backgroundVideoPath
+    ? // A couple seconds in tends to avoid a black fade-in frame at t=0.
+      ["-ss", "1.5", "-i", backgroundVideoPath]
+    : ["-f", "lavfi", "-i", `color=c=${theme.bg}:s=1080x1920:d=1:r=1`];
+
+  await execFileAsync("ffmpeg", [
+    "-y",
+    ...inputArgs,
+    "-vf", filters.join(","),
+    "-frames:v", "1",
+    "-q:v", "3",
+    outputPath,
+  ]);
+}
+
+/**
+ * Truncates transcript text to roughly maxChars, breaking on a word
+ * boundary and adding an ellipsis, so a very long prayer's thumbnail text
+ * doesn't overflow its scrim.
+ */
+function truncateForThumbnail(text, maxChars) {
+  const trimmed = text.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  const cut = trimmed.slice(0, maxChars);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${cut.slice(0, lastSpace > 0 ? lastSpace : maxChars)}…`;
 }
 
 /**

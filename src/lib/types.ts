@@ -44,6 +44,7 @@ export interface RenderJob {
   progress: number;
   error: string | null;
   output_url: string | null;
+  thumbnail_url: string | null;
   created_at: string;
   completed_at: string | null;
 }

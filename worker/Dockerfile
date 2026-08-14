@@ -11,5 +11,6 @@ COPY package.json ./
 RUN npm install --omit=dev
 
 COPY index.js ./
+COPY fonts ./fonts
 
 CMD ["node", "index.js"]
