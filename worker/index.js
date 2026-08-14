@@ -57,7 +57,9 @@ const STYLE_THEMES = {
 const DEFAULT_THEME = { bg: "0x2f4a3e", text: "white" };
 
 async function main() {
-  console.log("PrayerCanvas render worker started.");
+  console.log(
+    "PrayerCanvas render worker started. [build: word-caption-min-duration-v1]"
+  );
   for (;;) {
     let handled = false;
     try {
