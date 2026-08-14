@@ -50,11 +50,17 @@ export default async function SharedPrayerPage({
       </h1>
 
       {renderJob?.output_url ? (
+        // No autoPlay: mobile browsers block autoplay-with-sound outright,
+        // so it would either silently do nothing or (worse, without
+        // `muted`) just never start — controls alone are more predictable
+        // everywhere. playsInline is required on iOS Safari specifically;
+        // without it, tapping play forces the video into iOS's fullscreen
+        // native player instead of playing in the page.
         <video
           src={renderJob.output_url}
           poster={renderJob.thumbnail_url ?? undefined}
           controls
-          autoPlay
+          playsInline
           className="w-full rounded-xl"
         />
       ) : (

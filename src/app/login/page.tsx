@@ -44,20 +44,23 @@ export default function LoginPage() {
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <input
           type="email"
+          inputMode="email"
+          autoComplete="email"
           placeholder="Email"
           required
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="rounded-lg border border-neutral-300 px-4 py-2"
+          className="rounded-lg border border-neutral-300 px-4 py-2 text-base"
         />
         <input
           type="password"
+          autoComplete={mode === "sign_in" ? "current-password" : "new-password"}
           placeholder="Password"
           required
           minLength={6}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="rounded-lg border border-neutral-300 px-4 py-2"
+          className="rounded-lg border border-neutral-300 px-4 py-2 text-base"
         />
 
         {error && <p className="text-sm text-red-600">{error}</p>}

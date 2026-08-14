@@ -64,6 +64,7 @@ export default function RenderStatus({
           src={job.output_url}
           poster={job.thumbnail_url ?? undefined}
           controls
+          playsInline
           className="w-full rounded-lg"
         />
         <div className="flex flex-wrap items-center gap-2">

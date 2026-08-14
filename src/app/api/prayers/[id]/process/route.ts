@@ -57,7 +57,18 @@ export async function POST(
     }
     const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
 
-    const { text: transcript, segments, words } = await transcribeAudio(audioBuffer);
+    // The uploaded filename's extension reflects the actual recorded
+    // container (see create/page.tsx's extensionForMimeType — this used to
+    // be hardcoded to "raw.webm" for every upload, which broke Whisper on
+    // iPhone recordings that are actually MP4/AAC). Whisper infers the
+    // audio format from the filename it's given, so pass the real one
+    // through instead of always defaulting to "prayer.webm".
+    const storagePath = new URL(audioAsset.storage_url).pathname;
+    const ext = storagePath.split(".").pop()?.toLowerCase() || "webm";
+    const { text: transcript, segments, words } = await transcribeAudio(
+      audioBuffer,
+      `prayer.${ext}`
+    );
 
     if (!transcript.trim()) {
       throw new Error(

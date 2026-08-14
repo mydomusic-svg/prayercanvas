@@ -7,6 +7,44 @@ import type { AccentColor, Style, TextStyle } from "@/lib/types";
 
 type RecordingState = "idle" | "recording" | "recorded";
 
+// iOS Safari's MediaRecorder doesn't support webm at all — it records into
+// an MP4/AAC container. The old code always requested no mimeType (fine)
+// but then unconditionally labeled the resulting Blob (and later the
+// Storage upload path, and the Whisper filename) as "audio/webm" /
+// "raw.webm" regardless of what was actually recorded. On iPhone that lie
+// meant Whisper was handed an MP4 file asserted to be webm, which silently
+// produced empty or garbage transcripts. This picks (and remembers) the
+// real supported mimeType so the extension used everywhere downstream
+// matches the real container.
+const RECORDING_MIME_CANDIDATES = [
+  "audio/webm;codecs=opus",
+  "audio/webm",
+  "audio/mp4",
+  "audio/mp4;codecs=mp4a.40.2",
+  "audio/aac",
+];
+
+function pickRecordingMimeType(): string | undefined {
+  if (typeof MediaRecorder === "undefined" || !MediaRecorder.isTypeSupported) {
+    return undefined;
+  }
+  return RECORDING_MIME_CANDIDATES.find((type) =>
+    MediaRecorder.isTypeSupported(type)
+  );
+}
+
+// Maps a recorded/uploaded audio mimeType to a file extension so the
+// Storage path and the Whisper filename hint always match the actual bytes.
+function extensionForMimeType(mimeType: string | undefined): string {
+  const type = (mimeType || "").toLowerCase();
+  if (type.includes("mp4") || type.includes("m4a")) return "mp4";
+  if (type.includes("aac")) return "aac";
+  if (type.includes("ogg")) return "ogg";
+  if (type.includes("wav")) return "wav";
+  if (type.includes("mpeg") || type.includes("mp3")) return "mp3";
+  return "webm";
+}
+
 // Mirrors worker/index.js's TEXT_STYLES — three curated title looks rather
 // than an open font picker, so every choice is guaranteed to render well.
 const TEXT_STYLE_OPTIONS: {
@@ -84,14 +122,20 @@ export default function CreatePrayerPage() {
     setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      const mimeType = pickRecordingMimeType();
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
       chunksRef.current = [];
 
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
       recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        // recorder.mimeType reflects what the browser actually used, which
+        // may differ slightly from what we requested — prefer it.
+        const actualType = recorder.mimeType || mimeType || "audio/webm";
+        const blob = new Blob(chunksRef.current, { type: actualType });
         setAudioBlob(blob);
         setAudioUrl(URL.createObjectURL(blob));
         setRecordingState("recorded");
@@ -156,8 +200,13 @@ export default function CreatePrayerPage() {
 
       if (prayerError || !prayer) throw prayerError;
 
-      // 2. Upload the raw audio to Storage.
-      const path = `${user.id}/${prayer.id}/raw.webm`;
+      // 2. Upload the raw audio to Storage. The extension has to match the
+      //    actual container (see extensionForMimeType above) — Whisper
+      //    transcription downstream infers the audio format from this
+      //    filename, so a mismatched extension (e.g. always ".webm" for an
+      //    iPhone's MP4 recording) breaks transcription silently.
+      const ext = extensionForMimeType(audioBlob.type);
+      const path = `${user.id}/${prayer.id}/raw.${ext}`;
       const { error: uploadError } = await supabase.storage
         .from("prayer-audio")
         .upload(path, audioBlob, { contentType: audioBlob.type });
