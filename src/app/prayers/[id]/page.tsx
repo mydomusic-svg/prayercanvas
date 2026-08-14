@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import ProcessButton from "./process-button";
 import RenderStatus from "./render-status";
 import EditableTitle from "./editable-title";
+import HeroBanner from "../../hero-banner";
 import type { CaptionSegment } from "@/lib/types";
 
 export default async function PrayerDetailPage({
@@ -42,23 +43,25 @@ export default async function PrayerDetailPage({
     (prayer.recipient_name ? `A Prayer for ${prayer.recipient_name}` : "Untitled Prayer");
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-xl flex-col gap-6 px-6 py-16">
+    <>
+      <HeroBanner variant="slim" />
+      <main className="mx-auto flex min-h-screen max-w-xl flex-col gap-6 px-6 py-16">
       <div className="flex items-start justify-between gap-4">
         <EditableTitle prayerId={prayer.id} title={displayTitle} />
         {prayer.theme && (
-          <span className="shrink-0 rounded-full bg-neutral-100 px-3 py-1 text-xs font-medium capitalize text-neutral-600">
+          <span className="shrink-0 rounded-full bg-sage-100 px-3 py-1 text-xs font-medium capitalize text-sage-600">
             {prayer.theme}
           </span>
         )}
       </div>
 
       {prayer.transcript ? (
-        <p className="rounded-lg bg-neutral-50 p-4 text-neutral-700">
+        <p className="rounded-lg bg-sage-50 p-4 text-sage-700">
           {prayer.transcript}
         </p>
       ) : (
-        <section className="flex flex-col items-start gap-3 rounded-lg border border-dashed border-neutral-300 p-5">
-          <p className="text-sm text-neutral-500">
+        <section className="flex flex-col items-start gap-3 rounded-lg border border-dashed border-sage-300 p-5">
+          <p className="text-sm text-sage-500">
             This prayer hasn&apos;t been transcribed yet. Transcription and
             theme detection usually run automatically right after you submit
             — if it didn&apos;t (for example, missing API keys), you can
@@ -69,14 +72,14 @@ export default async function PrayerDetailPage({
       )}
 
       {captions.length > 0 && (
-        <details className="rounded-lg border border-neutral-200 p-4 text-sm text-neutral-600">
-          <summary className="cursor-pointer font-medium text-neutral-800">
+        <details className="rounded-lg border border-sage-200 p-4 text-sm text-sage-600">
+          <summary className="cursor-pointer font-medium text-sage-800">
             Caption timing ({captions.length} segments)
           </summary>
           <ul className="mt-3 flex flex-col gap-1">
             {captions.map((c, i) => (
               <li key={i} className="flex gap-3">
-                <span className="w-16 shrink-0 tabular-nums text-neutral-400">
+                <span className="w-16 shrink-0 tabular-nums text-sage-400">
                   {c.start.toFixed(1)}s
                 </span>
                 <span>{c.text}</span>
@@ -86,7 +89,7 @@ export default async function PrayerDetailPage({
         </details>
       )}
 
-      <section className="rounded-lg border border-neutral-200 p-5">
+      <section className="rounded-lg border border-sage-200 p-5">
         <p className="text-sm font-medium">Render status</p>
         <RenderStatus
           prayerId={prayer.id}
@@ -96,11 +99,12 @@ export default async function PrayerDetailPage({
         />
       </section>
 
-      <p className="text-xs text-neutral-400">
+      <p className="text-xs text-sage-400">
         Transcription and theme/title detection run via Claude + Whisper
         (Sprint 2). Actual video rendering still needs a render worker
         (Sprint 3) — see the README.
       </p>
-    </main>
+      </main>
+    </>
   );
 }

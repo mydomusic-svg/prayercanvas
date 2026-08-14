@@ -103,7 +103,7 @@ export default function PrayerGrid({
           {selectMode ? (
             <button
               onClick={exitSelectMode}
-              className="rounded-full border border-neutral-300 px-4 py-2 text-sm text-neutral-700 transition hover:bg-neutral-50"
+              className="rounded-full border border-sage-300 px-4 py-2 text-sm text-sage-700 transition hover:bg-sage-50"
             >
               Cancel
             </button>
@@ -111,7 +111,7 @@ export default function PrayerGrid({
             prayers.length > 0 && (
               <button
                 onClick={() => setSelectMode(true)}
-                className="rounded-full border border-neutral-300 px-4 py-2 text-sm text-neutral-700 transition hover:bg-neutral-50"
+                className="rounded-full border border-sage-300 px-4 py-2 text-sm text-sage-700 transition hover:bg-sage-50"
               >
                 Select
               </button>
@@ -119,7 +119,7 @@ export default function PrayerGrid({
           )}
           <Link
             href="/create"
-            className="rounded-full bg-neutral-900 px-5 py-2 text-sm text-white transition hover:bg-neutral-700"
+            className="rounded-full bg-sage-600 px-5 py-2 text-sm text-white transition hover:bg-sage-700"
           >
             + New Prayer
           </Link>
@@ -127,7 +127,7 @@ export default function PrayerGrid({
       </div>
 
       {!prayers || prayers.length === 0 ? (
-        <p className="text-neutral-500">
+        <p className="text-sage-500">
           You haven&apos;t created a prayer yet.{" "}
           <Link href="/create" className="underline">
             Create your first one
@@ -147,7 +147,7 @@ export default function PrayerGrid({
 
             const card = (
               <>
-                <div className="relative block aspect-[9/16] w-full bg-neutral-100">
+                <div className="relative block aspect-[9/16] w-full bg-sage-100">
                   {job?.thumbnail_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
@@ -156,7 +156,7 @@ export default function PrayerGrid({
                       className="h-full w-full object-cover"
                     />
                   ) : (
-                    <div className="flex h-full w-full items-center justify-center px-4 text-center text-sm text-neutral-400">
+                    <div className="flex h-full w-full items-center justify-center px-4 text-center text-sm text-sage-400">
                       {job?.status === "failed"
                         ? "Render failed"
                         : job
@@ -172,14 +172,14 @@ export default function PrayerGrid({
                   {selectMode && (
                     <div
                       className={`absolute inset-0 flex items-start justify-end p-3 transition ${
-                        isSelected ? "bg-neutral-900/30" : ""
+                        isSelected ? "bg-sage-900/30" : ""
                       }`}
                     >
                       <span
                         aria-hidden
                         className={`flex h-6 w-6 items-center justify-center rounded-full border-2 text-xs font-bold transition ${
                           isSelected
-                            ? "border-neutral-900 bg-neutral-900 text-white"
+                            ? "border-sage-600 bg-sage-600 text-white"
                             : "border-white bg-white/70 text-transparent"
                         }`}
                       >
@@ -193,12 +193,12 @@ export default function PrayerGrid({
                   <div className="flex items-start justify-between gap-2">
                     <span className="line-clamp-2 font-medium">{displayTitle}</span>
                     {prayer.theme && (
-                      <span className="shrink-0 rounded-full bg-neutral-100 px-2 py-0.5 text-xs capitalize text-neutral-600">
+                      <span className="shrink-0 rounded-full bg-sage-100 px-2 py-0.5 text-xs capitalize text-sage-600">
                         {prayer.theme}
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-neutral-400">
+                  <p className="text-xs text-sage-400">
                     {new Date(prayer.created_at).toLocaleDateString()}
                   </p>
 
@@ -223,7 +223,7 @@ export default function PrayerGrid({
               <li
                 key={prayer.id}
                 className={`flex flex-col overflow-hidden rounded-xl border transition ${
-                  isSelected ? "border-neutral-900" : "border-neutral-200"
+                  isSelected ? "border-sage-900" : "border-sage-200"
                 }`}
               >
                 {selectMode ? (
@@ -246,8 +246,8 @@ export default function PrayerGrid({
       )}
 
       {selectMode && selected.size > 0 && (
-        <div className="sticky bottom-4 z-10 flex items-center justify-between gap-3 rounded-full border border-neutral-200 bg-white px-5 py-3 shadow-lg">
-          <span className="text-sm text-neutral-600">
+        <div className="sticky bottom-4 z-10 flex items-center justify-between gap-3 rounded-full border border-sage-200 bg-white px-5 py-3 shadow-lg">
+          <span className="text-sm text-sage-600">
             {selected.size} selected
           </span>
           <button

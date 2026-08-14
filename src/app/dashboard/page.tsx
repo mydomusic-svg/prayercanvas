@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import PrayerGrid from "./prayer-grid";
+import HeroBanner from "../hero-banner";
 import type { RenderJob } from "@/lib/types";
 
 export default async function DashboardPage() {
@@ -44,8 +45,11 @@ export default async function DashboardPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-4xl flex-col gap-8 px-6 py-16">
-      <PrayerGrid prayers={prayers ?? []} jobs={jobs} userId={user.id} />
-    </main>
+    <>
+      <HeroBanner variant="slim" />
+      <main className="mx-auto flex min-h-screen max-w-4xl flex-col gap-8 px-6 py-16">
+        <PrayerGrid prayers={prayers ?? []} jobs={jobs} userId={user.id} />
+      </main>
+    </>
   );
 }

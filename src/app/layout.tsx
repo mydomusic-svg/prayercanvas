@@ -2,11 +2,21 @@ import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import SiteHeader from "./site-header";
 import ServiceWorkerRegistration from "./service-worker-registration";
+// Self-hosted via the @fontsource package (static files bundled at build
+// time) rather than next/font/google — this sandbox's network egress
+// blocks fonts.googleapis.com/fonts.gstatic.com, which next/font/google
+// needs to fetch from at build time. @fontsource ships the same font as
+// plain npm-installed files, so it needs no external fetch at all, the
+// same reasoning the three next/font/local fonts below already follow.
+import "@fontsource/cormorant-garamond/500.css";
+import "@fontsource/cormorant-garamond/600.css";
+import "@fontsource/cormorant-garamond/700.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PrayerCanvas",
-  description: "Speak a prayer. We'll turn it into a beautiful shareable video.",
+  title: "PrayerMessenger",
+  description:
+    "Send a prayer message. Speak it, and we'll turn it into a beautiful video you can send to anyone, anytime.",
   manifest: "/manifest.webmanifest",
   // Lets the app be added to the home screen on iOS looking like a native
   // app (own icon, no Safari chrome) — Android/Chrome gets the same via
@@ -14,7 +24,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "PrayerCanvas",
+    title: "PrayerMessenger",
   },
   other: {
     // Next only emits the newer standardized "mobile-web-app-capable" tag
@@ -40,7 +50,7 @@ export const viewport: Viewport = {
   // to pad around the iPhone notch/Dynamic Island and home indicator
   // instead of leaving black bars or letting content sit under them.
   viewportFit: "cover",
-  themeColor: "#171717",
+  themeColor: "#4f7a58",
 };
 
 // Preview fonts for the create-page text-style picker (see
@@ -71,7 +81,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`h-full antialiased ${greatVibes.variable} ${montserrat.variable} ${caveat.variable}`}
     >
       <body
-        className="min-h-full flex flex-col font-sans"
+        className="min-h-full flex flex-col bg-sage-50 font-sans text-sage-900"
         style={{
           // Pads the safe areas the notch/Dynamic Island and home-indicator
           // bar occupy on iPhone (and the equivalent on Android) now that
@@ -84,7 +94,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <SiteHeader />
         <div className="flex-1">{children}</div>
         <footer
-          className="py-6 text-center text-xs text-neutral-400"
+          className="py-6 text-center text-xs text-sage-500"
           style={{ paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom))" }}
         >
           <a href="/credits" className="underline">

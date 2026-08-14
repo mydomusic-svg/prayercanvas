@@ -54,7 +54,7 @@ export default function RenderStatus({
   }, [isSettled, prayerId]);
 
   if (!job) {
-    return <p className="text-neutral-500">No render job yet.</p>;
+    return <p className="text-sage-500">No render job yet.</p>;
   }
 
   if (job.status === "complete" && job.output_url) {
@@ -97,10 +97,10 @@ export default function RenderStatus({
   }
 
   return (
-    <div className="mt-1 flex items-center gap-2 text-neutral-500">
+    <div className="mt-1 flex items-center gap-2 text-sage-500">
       <span
         aria-hidden
-        className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-700"
+        className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-sage-300 border-t-sage-700"
       />
       <p>
         {job.status === "processing"

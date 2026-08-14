@@ -41,13 +41,13 @@ export default function DeleteAccountModal({ onClose }: { onClose: () => void })
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
       <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
-        <h2 className="text-lg font-semibold text-neutral-900">Delete account</h2>
-        <p className="mt-2 text-sm text-neutral-600">
+        <h2 className="text-lg font-semibold text-sage-900">Delete account</h2>
+        <p className="mt-2 text-sm text-sage-600">
           This permanently deletes your account and every prayer video you&apos;ve
           created. There&apos;s no way to undo this or recover your videos
           afterward.
         </p>
-        <p className="mt-3 text-sm text-neutral-600">
+        <p className="mt-3 text-sm text-sage-600">
           Type <span className="font-semibold">DELETE</span> to confirm.
         </p>
         <input
@@ -55,7 +55,7 @@ export default function DeleteAccountModal({ onClose }: { onClose: () => void })
           onChange={(e) => setConfirmText(e.target.value)}
           placeholder="DELETE"
           autoFocus
-          className="mt-2 w-full rounded-lg border border-neutral-300 px-4 py-2 text-base"
+          className="mt-2 w-full rounded-lg border border-sage-300 px-4 py-2 text-base"
         />
 
         {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
@@ -64,7 +64,7 @@ export default function DeleteAccountModal({ onClose }: { onClose: () => void })
           <button
             onClick={onClose}
             disabled={deleting}
-            className="rounded-full border border-neutral-300 px-4 py-1.5 text-sm text-neutral-700 transition hover:bg-neutral-50 disabled:opacity-50"
+            className="rounded-full border border-sage-300 px-4 py-1.5 text-sm text-sage-700 transition hover:bg-sage-50 disabled:opacity-50"
           >
             Cancel
           </button>

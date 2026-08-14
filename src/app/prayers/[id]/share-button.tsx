@@ -24,11 +24,11 @@ export default function ShareButton({ prayerId }: { prayerId: string }) {
 
   if (link) {
     return (
-      <div className="flex items-center gap-2 rounded-lg bg-neutral-50 px-4 py-2 text-sm">
+      <div className="flex items-center gap-2 rounded-lg bg-sage-50 px-4 py-2 text-sm">
         <span className="truncate">{link}</span>
         <button
           onClick={() => navigator.clipboard.writeText(link)}
-          className="shrink-0 text-neutral-600 underline"
+          className="shrink-0 text-sage-600 underline"
         >
           Copy
         </button>
@@ -40,7 +40,7 @@ export default function ShareButton({ prayerId }: { prayerId: string }) {
     <button
       onClick={createShareLink}
       disabled={loading}
-      className="rounded-full border border-neutral-300 px-4 py-1.5 text-sm text-neutral-700 transition hover:bg-neutral-50 disabled:opacity-50"
+      className="rounded-full border border-sage-300 px-4 py-1.5 text-sm text-sage-700 transition hover:bg-sage-50 disabled:opacity-50"
     >
       {loading ? "Creating link…" : "Get Public Link"}
     </button>

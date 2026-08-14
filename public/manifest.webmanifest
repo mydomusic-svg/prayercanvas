@@ -1,12 +1,12 @@
 {
-  "name": "PrayerCanvas",
-  "short_name": "PrayerCanvas",
-  "description": "Speak a prayer. We'll turn it into a beautiful shareable video.",
+  "name": "PrayerMessenger",
+  "short_name": "PrayerMessenger",
+  "description": "Send a prayer message. Speak it, and we'll turn it into a beautiful video you can send to anyone, anytime.",
   "start_url": "/dashboard",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#171717",
-  "theme_color": "#171717",
+  "background_color": "#f4f7f2",
+  "theme_color": "#4f7a58",
   "orientation": "portrait",
   "icons": [
     {

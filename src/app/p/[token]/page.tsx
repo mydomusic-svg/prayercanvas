@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
+import HeroBanner from "../../hero-banner";
 
 export default async function SharedPrayerPage({
   params,
@@ -41,7 +42,9 @@ export default async function SharedPrayerPage({
   };
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center gap-6 px-6 text-center">
+    <>
+      <HeroBanner variant="slim" />
+      <main className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center gap-6 px-6 text-center">
       <h1 className="text-2xl font-semibold">
         {prayer.title ||
           (prayer.recipient_name
@@ -64,10 +67,11 @@ export default async function SharedPrayerPage({
           className="w-full rounded-xl"
         />
       ) : (
-        <p className="text-neutral-500">This prayer is still being prepared.</p>
+        <p className="text-sage-500">This prayer is still being prepared.</p>
       )}
 
-      <p className="text-sm text-neutral-400">Made with PrayerCanvas</p>
-    </main>
+      <p className="text-sm text-sage-400">Made with PrayerMessenger</p>
+      </main>
+    </>
   );
 }

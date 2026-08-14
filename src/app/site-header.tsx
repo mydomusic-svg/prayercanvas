@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { createClient } from "@/lib/supabase/server";
 import AccountMenu from "./account-menu";
 
@@ -12,26 +13,53 @@ export default async function SiteHeader() {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // public.users.display_name is auto-populated from auth signup metadata
+  // (or falls back to email) via a DB trigger — see supabase/migrations.
+  // This is what recipients/other users should see instead of the raw
+  // email address.
+  let displayName: string | null = null;
+  if (user) {
+    const { data: profile } = await supabase
+      .from("users")
+      .select("display_name")
+      .eq("id", user.id)
+      .maybeSingle();
+    displayName = profile?.display_name ?? null;
+  }
+
   return (
     <header
-      className="border-b border-neutral-200"
+      className="border-b border-sage-200"
       style={{ paddingTop: "env(safe-area-inset-top)" }}
     >
       <div className="mx-auto flex max-w-2xl items-center justify-between gap-2 px-4 py-3 sm:px-6 sm:py-4">
-        <Link href={user ? "/dashboard" : "/"} className="shrink-0 font-semibold">
-          PrayerCanvas
+        <Link
+          href={user ? "/dashboard" : "/"}
+          className="flex shrink-0 items-center gap-2"
+        >
+          <Image
+            src="/logo-mark.png"
+            alt=""
+            width={32}
+            height={32}
+            className="h-8 w-8"
+            priority
+          />
+          <span className="font-headline text-xl font-semibold text-sage-900">
+            PrayerMessenger
+          </span>
         </Link>
         {user && (
           <nav className="flex items-center gap-2 text-sm sm:gap-4">
             <Link
               href="/dashboard"
-              className="hidden text-neutral-600 hover:text-neutral-900 sm:inline"
+              className="hidden text-sage-600 hover:text-sage-900 sm:inline"
             >
               My Prayers
             </Link>
             <Link
               href="/create"
-              className="rounded-full bg-neutral-900 px-3 py-1.5 text-white transition hover:bg-neutral-700 sm:px-4"
+              className="rounded-full bg-sage-600 px-3 py-1.5 text-white transition hover:bg-sage-700 sm:px-4"
             >
               <span className="hidden sm:inline">+ New Prayer</span>
               <span className="sm:hidden" aria-hidden>
@@ -39,7 +67,7 @@ export default async function SiteHeader() {
               </span>
               <span className="sr-only sm:hidden">New Prayer</span>
             </Link>
-            <AccountMenu email={user.email ?? null} />
+            <AccountMenu email={user.email ?? null} displayName={displayName} />
           </nav>
         )}
       </div>

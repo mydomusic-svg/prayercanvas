@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import HeroBanner from "../hero-banner";
 import type { AccentColor, Style, TextStyle } from "@/lib/types";
 
 type RecordingState = "idle" | "recording" | "recorded";
@@ -252,8 +253,10 @@ export default function CreatePrayerPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-xl flex-col gap-8 px-6 py-16">
-      <h1 className="text-2xl font-semibold">Create a Prayer</h1>
+    <>
+      <HeroBanner variant="slim" />
+      <main className="mx-auto flex min-h-screen max-w-xl flex-col gap-8 px-6 py-16">
+        <h1 className="text-2xl font-semibold">Create a Prayer</h1>
 
       <section className="flex flex-col gap-4">
         <label className="flex flex-col gap-1 text-sm">
@@ -262,7 +265,7 @@ export default function CreatePrayerPage() {
             value={recipientName}
             onChange={(e) => setRecipientName(e.target.value)}
             placeholder="e.g. Marcus"
-            className="rounded-lg border border-neutral-300 px-4 py-2"
+            className="rounded-lg border border-sage-300 px-4 py-2"
           />
         </label>
 
@@ -272,12 +275,12 @@ export default function CreatePrayerPage() {
             value={occasion}
             onChange={(e) => setOccasion(e.target.value)}
             placeholder="e.g. New job"
-            className="rounded-lg border border-neutral-300 px-4 py-2"
+            className="rounded-lg border border-sage-300 px-4 py-2"
           />
         </label>
       </section>
 
-      <section className="flex flex-col items-center gap-4 rounded-xl border border-neutral-200 p-6">
+      <section className="flex flex-col items-center gap-4 rounded-xl border border-sage-200 p-6">
         {recordingState !== "recorded" && (
           <button
             onClick={
@@ -286,7 +289,7 @@ export default function CreatePrayerPage() {
             className={`rounded-full px-6 py-3 text-white transition ${
               recordingState === "recording"
                 ? "bg-red-600 hover:bg-red-500"
-                : "bg-neutral-900 hover:bg-neutral-700"
+                : "bg-sage-600 hover:bg-sage-700"
             }`}
           >
             {recordingState === "recording" ? "Stop Recording" : "Start Recording"}
@@ -302,16 +305,16 @@ export default function CreatePrayerPage() {
                 setAudioUrl(null);
                 setRecordingState("idle");
               }}
-              className="text-sm text-neutral-500 underline"
+              className="text-sm text-sage-500 underline"
             >
               Re-record
             </button>
           </div>
         )}
 
-        <div className="text-sm text-neutral-400">or</div>
+        <div className="text-sm text-sage-400">or</div>
 
-        <label className="cursor-pointer text-sm text-neutral-600 underline">
+        <label className="cursor-pointer text-sm text-sage-600 underline">
           Upload an audio file
           <input
             type="file"
@@ -332,8 +335,8 @@ export default function CreatePrayerPage() {
                 onClick={() => setSelectedStyleId(style.id)}
                 className={`rounded-lg border px-4 py-3 text-sm transition ${
                   selectedStyleId === style.id
-                    ? "border-neutral-900 bg-neutral-900 text-white"
-                    : "border-neutral-300 hover:bg-neutral-50"
+                    ? "border-sage-600 bg-sage-600 text-white"
+                    : "border-sage-300 hover:bg-sage-50"
                 }`}
               >
                 {style.name}
@@ -353,13 +356,13 @@ export default function CreatePrayerPage() {
               onClick={() => setTextStyle(option.id)}
               className={`flex flex-col items-center justify-center gap-1 rounded-lg border px-3 py-4 transition ${
                 textStyle === option.id
-                  ? "border-neutral-900 bg-neutral-900"
-                  : "border-neutral-300 hover:bg-neutral-50"
+                  ? "border-sage-600 bg-sage-600"
+                  : "border-sage-300 hover:bg-sage-50"
               }`}
             >
               <span
                 className={`text-2xl leading-tight ${
-                  textStyle === option.id ? "text-white" : "text-neutral-900"
+                  textStyle === option.id ? "text-white" : "text-sage-900"
                 }`}
                 style={{ fontFamily: option.fontVar }}
               >
@@ -367,7 +370,7 @@ export default function CreatePrayerPage() {
               </span>
               <span
                 className={`text-xs ${
-                  textStyle === option.id ? "text-neutral-300" : "text-neutral-500"
+                  textStyle === option.id ? "text-sage-300" : "text-sage-500"
                 }`}
               >
                 {option.label}
@@ -387,14 +390,14 @@ export default function CreatePrayerPage() {
               aria-label={option.label}
               className={`h-9 w-9 rounded-full border-2 transition ${
                 accentColor === option.id
-                  ? "border-neutral-900 ring-2 ring-offset-2 ring-neutral-900"
-                  : "border-neutral-300"
+                  ? "border-sage-900 ring-2 ring-offset-2 ring-sage-900"
+                  : "border-sage-300"
               }`}
               style={{ backgroundColor: option.hex }}
             />
           ))}
         </div>
-        <p className="text-xs text-neutral-400">
+        <p className="text-xs text-sage-400">
           Applied to the title in your video and its thumbnail.
         </p>
       </section>
@@ -404,7 +407,7 @@ export default function CreatePrayerPage() {
       <button
         onClick={handleSubmit}
         disabled={submitting || !audioBlob}
-        className="rounded-full bg-neutral-900 px-6 py-3 text-white transition hover:bg-neutral-700 disabled:opacity-50"
+        className="rounded-full bg-sage-600 px-6 py-3 text-white transition hover:bg-sage-700 disabled:opacity-50"
       >
         {processing
           ? "Transcribing & analyzing…"
@@ -412,6 +415,7 @@ export default function CreatePrayerPage() {
             ? "Submitting…"
             : "Create Prayer Video"}
       </button>
-    </main>
+      </main>
+    </>
   );
 }

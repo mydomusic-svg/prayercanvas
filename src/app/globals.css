@@ -1,20 +1,30 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f4f7f2;
+  --foreground: #263029;
 }
 
+/* PrayerMessenger's "Soft Sage" palette — a custom scale (rather than
+   Tailwind's built-in green, which doesn't match) used throughout via
+   `bg-sage-*` / `text-sage-*` / `border-sage-*` utility classes, the same
+   way the app previously used Tailwind's default `neutral-*` scale. Numbered
+   the same 50→900 way so every existing neutral-N usage has a like-for-like
+   sage-N replacement. */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-sage-50: #f4f7f2;
+  --color-sage-100: #eaf2e8;
+  --color-sage-200: #dde8db;
+  --color-sage-300: #c3d6bf;
+  --color-sage-400: #9bb894;
+  --color-sage-500: #7a9f76;
+  --color-sage-600: #4f7a58;
+  --color-sage-700: #3f6249;
+  --color-sage-800: #324d3c;
+  --color-sage-900: #263029;
 }
 
 body {
@@ -23,4 +33,11 @@ body {
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
     sans-serif;
+}
+
+/* Headline serif — Cormorant Garamond, self-hosted via @fontsource and
+   imported in layout.tsx. Applied through this utility rather than inline
+   styles everywhere a heading appears. */
+.font-headline {
+  font-family: "Cormorant Garamond", Georgia, serif;
 }

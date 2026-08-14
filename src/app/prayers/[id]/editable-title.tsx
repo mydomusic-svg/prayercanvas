@@ -51,7 +51,7 @@ export default function EditableTitle({
             setEditing(false);
           }
         }}
-        className="w-full rounded-lg border border-neutral-300 px-3 py-1 text-2xl font-semibold outline-none"
+        className="w-full rounded-lg border border-sage-300 px-3 py-1 text-2xl font-semibold outline-none"
       />
     );
   }
@@ -60,7 +60,7 @@ export default function EditableTitle({
     <button
       onClick={() => setEditing(true)}
       title="Click to rename"
-      className="text-left text-2xl font-semibold decoration-dashed decoration-neutral-300 decoration-2 underline-offset-4 hover:underline"
+      className="text-left text-2xl font-semibold decoration-dashed decoration-sage-300 decoration-2 underline-offset-4 hover:underline"
     >
       {title}
     </button>

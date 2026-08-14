@@ -30,7 +30,7 @@ export default function ProcessButton({ prayerId }: { prayerId: string }) {
       <button
         onClick={handleClick}
         disabled={loading}
-        className="rounded-full bg-neutral-900 px-5 py-2 text-sm text-white transition hover:bg-neutral-700 disabled:opacity-50"
+        className="rounded-full bg-sage-600 px-5 py-2 text-sm text-white transition hover:bg-sage-700 disabled:opacity-50"
       >
         {loading ? "Transcribing & analyzing…" : "Transcribe & Analyze"}
       </button>

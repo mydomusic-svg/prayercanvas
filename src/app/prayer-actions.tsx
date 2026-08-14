@@ -145,8 +145,8 @@ export default function PrayerActions({
   }
 
   const btnClass = compact
-    ? "rounded-full border border-neutral-300 px-3 py-1 text-xs text-neutral-600 transition hover:bg-neutral-50 disabled:opacity-50"
-    : "rounded-full border border-neutral-300 px-4 py-1.5 text-sm text-neutral-700 transition hover:bg-neutral-50 disabled:opacity-50";
+    ? "rounded-full border border-sage-300 px-3 py-1 text-xs text-sage-600 transition hover:bg-sage-50 disabled:opacity-50"
+    : "rounded-full border border-sage-300 px-4 py-1.5 text-sm text-sage-700 transition hover:bg-sage-50 disabled:opacity-50";
 
   return (
     <div className="flex flex-wrap items-center gap-2">
