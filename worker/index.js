@@ -419,7 +419,7 @@ async function generateThumbnail({
   outputPath,
 }) {
   const titleLinesPath = path.join(workDir, "thumb-title.txt");
-  await writeFile(titleLinesPath, wrapText(title, 16), "utf8");
+  await writeFile(titleLinesPath, wrapText(title, 20), "utf8");
 
   const bodyLinesPath = path.join(workDir, "thumb-body.txt");
   await writeFile(
@@ -440,10 +440,10 @@ async function generateThumbnail({
   }
   filters.push(`drawbox=x=0:y=440:w=1080:h=1040:color=${scrimColor}:t=fill`);
   filters.push(
-    `drawtext=textfile='${titleLinesPath}':fontfile='${FONT_CALLIGRAPHY}':fontsize=74:fontcolor=${theme.accent}:line_spacing=8:x=(w-text_w)/2:y=530`
+    `drawtext=textfile='${titleLinesPath}':fontfile='${FONT_CALLIGRAPHY}':fontsize=70:fontcolor=${theme.accent}:line_spacing=6:x=(w-text_w)/2:y=530`
   );
   filters.push(
-    `drawtext=textfile='${bodyLinesPath}':fontfile='${FONT_SERIF}':fontsize=40:fontcolor=${theme.text}:line_spacing=20:x=(w-text_w)/2:y=790`
+    `drawtext=textfile='${bodyLinesPath}':fontfile='${FONT_SERIF}':fontsize=40:fontcolor=${theme.text}:line_spacing=20:x=(w-text_w)/2:y=830`
   );
 
   const inputArgs = backgroundVideoPath
