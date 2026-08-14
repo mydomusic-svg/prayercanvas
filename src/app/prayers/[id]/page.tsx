@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import ShareButton from "./share-button";
 import ProcessButton from "./process-button";
+import RenderStatus from "./render-status";
 import type { CaptionSegment } from "@/lib/types";
 
 export default async function PrayerDetailPage({
@@ -89,29 +89,7 @@ export default async function PrayerDetailPage({
 
       <section className="rounded-lg border border-neutral-200 p-5">
         <p className="text-sm font-medium">Render status</p>
-        {!renderJob ? (
-          <p className="text-neutral-500">No render job yet.</p>
-        ) : renderJob.status === "complete" && renderJob.output_url ? (
-          <div className="mt-3 flex flex-col gap-3">
-            <video
-              src={renderJob.output_url}
-              poster={renderJob.thumbnail_url ?? undefined}
-              controls
-              className="w-full rounded-lg"
-            />
-            <ShareButton prayerId={prayer.id} />
-          </div>
-        ) : renderJob.status === "failed" ? (
-          <p className="text-red-600">
-            Render failed: {renderJob.error ?? "Unknown error"}
-          </p>
-        ) : (
-          <p className="text-neutral-500">
-            {renderJob.status === "processing"
-              ? `Rendering… (${renderJob.progress}%)`
-              : "Queued — the render worker will pick this up shortly."}
-          </p>
-        )}
+        <RenderStatus prayerId={prayer.id} initialJob={renderJob} />
       </section>
 
       <p className="text-xs text-neutral-400">
