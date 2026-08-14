@@ -366,23 +366,39 @@ async function renderPrayer(job, workDir) {
 
   const thumbnailBuffer = await readFile(thumbnailPath);
   const thumbnailStoragePath = `${prayer.user_id}/${prayer.id}/thumbnail-${job.id}.jpg`;
-  const { error: thumbnailUploadError } = await supabase.storage
-    .from(VIDEO_BUCKET)
-    .upload(thumbnailStoragePath, thumbnailBuffer, {
-      contentType: "image/jpeg",
-      upsert: true,
-    });
-  // A broken thumbnail shouldn't fail an otherwise-successful render — log
-  // and continue without one rather than throwing.
+  // Thumbnail uploads have shown an intermittent, transient failure (seen
+  // once in production with no other symptoms -- retrying immediately
+  // succeeded). Retry a couple of times with a short backoff before giving
+  // up. A broken thumbnail still shouldn't fail an otherwise-successful
+  // render -- log and continue without one rather than throwing.
   let thumbnailUrl = null;
-  if (thumbnailUploadError) {
-    console.error(
-      `Render job ${job.id}: thumbnail upload failed: ${thumbnailUploadError.message}`
-    );
-  } else {
-    thumbnailUrl = supabase.storage
+  let lastThumbnailError = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const { error: thumbnailUploadError } = await supabase.storage
       .from(VIDEO_BUCKET)
-      .getPublicUrl(thumbnailStoragePath).data.publicUrl;
+      .upload(thumbnailStoragePath, thumbnailBuffer, {
+        contentType: "image/jpeg",
+        upsert: true,
+      });
+    if (!thumbnailUploadError) {
+      thumbnailUrl = supabase.storage
+        .from(VIDEO_BUCKET)
+        .getPublicUrl(thumbnailStoragePath).data.publicUrl;
+      lastThumbnailError = null;
+      break;
+    }
+    lastThumbnailError = thumbnailUploadError;
+    console.error(
+      `Render job ${job.id}: thumbnail upload attempt ${attempt} failed: ${thumbnailUploadError.message}`
+    );
+    if (attempt < 3) {
+      await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+    }
+  }
+  if (lastThumbnailError) {
+    console.error(
+      `Render job ${job.id}: thumbnail upload gave up after 3 attempts: ${lastThumbnailError.message}`
+    );
   }
 
   await supabase.from("media_assets").insert({
