@@ -181,12 +181,26 @@ async function renderPrayer(job, workDir) {
   // Older prayers rendered before this feature won't have word_timings —
   // buildFilterComplex falls back to the plain per-segment captions above
   // when this array is empty.
+  //
+  // Whisper's raw per-word windows are frequently far too short to render or
+  // read: many are 20-40ms, and some have start === end (zero width). At
+  // 30fps a frame lands every ~33ms, so a sub-33ms window can fall between
+  // two sampled frames and never actually appear on screen — which is
+  // exactly what was happening. We stretch every word to a minimum on-screen
+  // duration, capped so it never overlaps into the next word's own start.
+  const MIN_WORD_DISPLAY_SECONDS = 0.35;
   const words = Array.isArray(prayer.word_timings) ? prayer.word_timings : [];
   const wordFiles = [];
   for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    const start = word.start;
+    const nextStart = i + 1 < words.length ? words[i + 1].start : Infinity;
+    const desiredEnd = Math.max(word.end, start + MIN_WORD_DISPLAY_SECONDS);
+    const end = Math.max(Math.min(desiredEnd, nextStart), start + 0.05);
+
     const wordPath = path.join(workDir, `word-${i}.txt`);
-    await writeFile(wordPath, (words[i].word ?? "").trim(), "utf8");
-    wordFiles.push({ path: wordPath, start: words[i].start, end: words[i].end });
+    await writeFile(wordPath, (word.word ?? "").trim(), "utf8");
+    wordFiles.push({ path: wordPath, start, end });
   }
 
   // Download the real background video / music for this style, if the
