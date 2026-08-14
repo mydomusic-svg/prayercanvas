@@ -247,21 +247,42 @@ async function renderPrayer(job, workDir) {
     audioInputArgs.push("-stream_loop", "-1", "-i", musicPath, "-t", duration.toFixed(2));
   }
 
-  await execFileAsync("ffmpeg", [
-    "-y",
-    ...inputArgs,
-    ...audioInputArgs,
-    "-filter_complex", filterComplex,
-    "-map", "[vfinal]",
-    "-map", "[aout]",
-    "-c:v", "libx264",
-    "-preset", "veryfast",
-    "-pix_fmt", "yuv420p",
-    "-c:a", "aac",
-    "-b:a", "192k",
-    "-shortest",
-    outputPath,
-  ]);
+  // Diagnostic: word/caption counts and filter_complex length, so we can
+  // confirm from Railway logs alone whether the word-highlight path was
+  // actually taken and whether ffmpeg raised any font/filter warnings —
+  // without needing to eyeball the rendered video.
+  console.log(
+    `Render job ${job.id}: ${wordFiles.length} word file(s), ${captionFiles.length} caption file(s), ` +
+      `filter_complex is ${filterComplex.length} chars.`
+  );
+
+  try {
+    const ffmpegResult = await execFileAsync("ffmpeg", [
+      "-y",
+      ...inputArgs,
+      ...audioInputArgs,
+      "-filter_complex", filterComplex,
+      "-map", "[vfinal]",
+      "-map", "[aout]",
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-pix_fmt", "yuv420p",
+      "-c:a", "aac",
+      "-b:a", "192k",
+      "-shortest",
+      outputPath,
+    ]);
+    const stderrTail = (ffmpegResult.stderr ?? "").slice(-1500);
+    console.log(`Render job ${job.id}: ffmpeg stderr tail:\n${stderrTail}`);
+  } catch (ffmpegErr) {
+    // execFileAsync's rejection only includes a truncated message by
+    // default — log the full stderr so a font/filter parse error is
+    // actually visible instead of just "Command failed".
+    console.error(
+      `Render job ${job.id}: ffmpeg failed. stderr:\n${ffmpegErr.stderr ?? ffmpegErr.message}`
+    );
+    throw ffmpegErr;
+  }
 
   await updateJob(job.id, { progress: 80 });
 
