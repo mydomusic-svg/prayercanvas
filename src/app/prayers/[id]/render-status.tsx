@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { RenderJob } from "@/lib/types";
 import ShareButton from "./share-button";
+import PrayerActions from "../../prayer-actions";
 
 // Polls for render_jobs updates instead of leaving the user staring at a
 // static "Queued" message with no way to know when (or whether) their video
@@ -14,12 +16,17 @@ import ShareButton from "./share-button";
 // moment it's done, no refresh needed.
 export default function RenderStatus({
   prayerId,
+  userId,
+  title,
   initialJob,
 }: {
   prayerId: string;
+  userId: string;
+  title: string;
   initialJob: RenderJob | null;
 }) {
   const supabase = createClient();
+  const router = useRouter();
   const [job, setJob] = useState<RenderJob | null>(initialJob);
   const pollCountRef = useRef(0);
 
@@ -59,14 +66,32 @@ export default function RenderStatus({
           controls
           className="w-full rounded-lg"
         />
-        <ShareButton prayerId={prayerId} />
+        <div className="flex flex-wrap items-center gap-2">
+          <PrayerActions
+            prayerId={prayerId}
+            userId={userId}
+            videoUrl={job.output_url}
+            title={title}
+            onDeleted={() => router.push("/dashboard")}
+          />
+          <ShareButton prayerId={prayerId} />
+        </div>
       </div>
     );
   }
 
   if (job.status === "failed") {
     return (
-      <p className="text-red-600">Render failed: {job.error ?? "Unknown error"}</p>
+      <div className="flex flex-col gap-3">
+        <p className="text-red-600">Render failed: {job.error ?? "Unknown error"}</p>
+        <PrayerActions
+          prayerId={prayerId}
+          userId={userId}
+          videoUrl={null}
+          title={title}
+          onDeleted={() => router.push("/dashboard")}
+        />
+      </div>
     );
   }
 

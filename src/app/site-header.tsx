@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import AccountMenu from "./account-menu";
 
 // A small persistent header so users can always get back to their list of
 // rendered videos — previously the only way back to /dashboard was the
@@ -28,6 +29,7 @@ export default async function SiteHeader() {
             >
               + New Prayer
             </Link>
+            <AccountMenu email={user.email ?? null} />
           </nav>
         )}
       </div>

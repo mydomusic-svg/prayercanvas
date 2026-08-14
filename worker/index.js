@@ -363,9 +363,26 @@ async function renderPrayer(job, workDir) {
       "-map", "[aout]",
       "-c:v", "libx264",
       "-preset", "veryfast",
+      // Sprint 4: tuned for easy sharing (email/MMS/social) rather than
+      // ffmpeg's untuned default. CRF 23 (the implicit default when neither
+      // -crf nor -b:v is set) produced needlessly large files for content
+      // that's mostly a static/looped background with text and captions —
+      // very compressible. CRF 28 still looks clean for this content and
+      // roughly halves file size; maxrate/bufsize caps the rare high-motion
+      // background clip from spiking well past that.
+      "-crf", "28",
+      "-maxrate", "2500k",
+      "-bufsize", "5000k",
       "-pix_fmt", "yuv420p",
+      // faststart moves the moov atom to the front so the video can start
+      // playing before it's fully downloaded — matters once these are being
+      // opened from share-sheet links on mobile data instead of a fast wifi
+      // connection in the browser.
+      "-movflags", "+faststart",
       "-c:a", "aac",
-      "-b:a", "192k",
+      // Spoken word doesn't need 192k; 128k is still clean for voice+music
+      // and shaves a bit more off the file size.
+      "-b:a", "128k",
       "-shortest",
       outputPath,
     ]);

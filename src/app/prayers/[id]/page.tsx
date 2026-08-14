@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import ProcessButton from "./process-button";
 import RenderStatus from "./render-status";
+import EditableTitle from "./editable-title";
 import type { CaptionSegment } from "@/lib/types";
 
 export default async function PrayerDetailPage({
@@ -36,16 +37,14 @@ export default async function PrayerDetailPage({
     .maybeSingle();
 
   const captions = (prayer.captions as CaptionSegment[] | null) ?? [];
+  const displayTitle =
+    prayer.title ||
+    (prayer.recipient_name ? `A Prayer for ${prayer.recipient_name}` : "Untitled Prayer");
 
   return (
     <main className="mx-auto flex min-h-screen max-w-xl flex-col gap-6 px-6 py-16">
       <div className="flex items-start justify-between gap-4">
-        <h1 className="text-2xl font-semibold">
-          {prayer.title ||
-            (prayer.recipient_name
-              ? `A Prayer for ${prayer.recipient_name}`
-              : "Untitled Prayer")}
-        </h1>
+        <EditableTitle prayerId={prayer.id} title={displayTitle} />
         {prayer.theme && (
           <span className="shrink-0 rounded-full bg-neutral-100 px-3 py-1 text-xs font-medium capitalize text-neutral-600">
             {prayer.theme}
@@ -89,7 +88,12 @@ export default async function PrayerDetailPage({
 
       <section className="rounded-lg border border-neutral-200 p-5">
         <p className="text-sm font-medium">Render status</p>
-        <RenderStatus prayerId={prayer.id} initialJob={renderJob} />
+        <RenderStatus
+          prayerId={prayer.id}
+          userId={user.id}
+          title={displayTitle}
+          initialJob={renderJob}
+        />
       </section>
 
       <p className="text-xs text-neutral-400">
