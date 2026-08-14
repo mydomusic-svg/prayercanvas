@@ -40,12 +40,12 @@ export default async function SiteHeader() {
           <Image
             src="/logo-mark.png"
             alt=""
-            width={32}
-            height={32}
-            className="h-8 w-8"
+            width={40}
+            height={40}
+            className="h-9 w-9 sm:h-10 sm:w-10"
             priority
           />
-          <span className="font-headline text-xl font-semibold text-sage-900">
+          <span className="font-headline text-2xl font-bold tracking-tight text-sage-900 sm:text-3xl">
             PrayerMessenger
           </span>
         </Link>
@@ -56,6 +56,12 @@ export default async function SiteHeader() {
               className="hidden text-sage-600 hover:text-sage-900 sm:inline"
             >
               My Prayers
+            </Link>
+            <Link
+              href="/pricing"
+              className="hidden text-sage-600 hover:text-sage-900 sm:inline"
+            >
+              Pricing
             </Link>
             <Link
               href="/create"

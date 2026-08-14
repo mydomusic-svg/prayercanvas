@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import HeroBanner from "../hero-banner";
 import type { AccentColor, Style, TextStyle } from "@/lib/types";
@@ -103,6 +104,7 @@ export default function CreatePrayerPage() {
   const [submitting, setSubmitting] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -173,6 +175,7 @@ export default function CreatePrayerPage() {
 
     setSubmitting(true);
     setError(null);
+    setQuotaExceeded(false);
 
     try {
       const {
@@ -246,7 +249,21 @@ export default function CreatePrayerPage() {
 
       router.push(`/prayers/${prayer.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      // enforce_prayer_quota() raises this exact message once billing is
+      // enabled and a free-tier user is past their 2 videos this month —
+      // give them a real next step instead of a generic error.
+      const message =
+        err instanceof Error
+          ? err.message
+          : typeof err === "object" && err && "message" in err
+            ? String((err as { message: unknown }).message)
+            : "Something went wrong.";
+
+      if (message === "quota_exceeded") {
+        setQuotaExceeded(true);
+      } else {
+        setError(message);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -403,6 +420,21 @@ export default function CreatePrayerPage() {
       </section>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
+
+      {quotaExceeded && (
+        <div className="flex flex-col items-center gap-2 rounded-lg border border-sage-300 bg-sage-50 p-4 text-center text-sm text-sage-700">
+          <p>
+            You&apos;ve used your 2 free prayer videos this month. Upgrade to
+            PrayerMessenger Plus for unlimited videos, or buy just one more.
+          </p>
+          <Link
+            href="/pricing"
+            className="rounded-full bg-sage-600 px-4 py-2 text-white transition hover:bg-sage-700"
+          >
+            See plans
+          </Link>
+        </div>
+      )}
 
       <button
         onClick={handleSubmit}

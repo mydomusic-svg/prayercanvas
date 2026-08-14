@@ -97,6 +97,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           className="py-6 text-center text-xs text-sage-500"
           style={{ paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom))" }}
         >
+          <a href="/pricing" className="underline">
+            Pricing
+          </a>
+          <span className="mx-2">&middot;</span>
           <a href="/credits" className="underline">
             Video &amp; music credits
           </a>
