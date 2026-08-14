@@ -1,4 +1,4 @@
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 
 # ffmpeg for rendering, fontconfig + DejaVu for burned-in captions.
 RUN apt-get update \
