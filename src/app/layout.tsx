@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import SiteHeader from "./site-header";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -35,6 +36,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`h-full antialiased ${greatVibes.variable} ${montserrat.variable} ${caveat.variable}`}
     >
       <body className="min-h-full flex flex-col font-sans">
+        <SiteHeader />
         <div className="flex-1">{children}</div>
         <footer className="py-6 text-center text-xs text-neutral-400">
           <a href="/credits" className="underline">
