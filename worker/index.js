@@ -140,7 +140,7 @@ process.on("SIGINT", () => shutdown("SIGINT"));
 
 async function main() {
   console.log(
-    "PrayerCanvas render worker started. [build: word-caption-min-duration-v1]"
+    "PrayerCanvas render worker started. [build: audio-duration-fallback-v1]"
   );
   for (;;) {
     if (shuttingDown) return;
@@ -241,7 +241,22 @@ async function renderPrayer(job, workDir) {
 
   await updateJob(job.id, { progress: 15 });
 
-  const audioPath = path.join(workDir, "audio.webm");
+  // The local filename's extension has to match the real container —
+  // iPhone recordings upload as raw.mp4 (or .aac) rather than .webm (see
+  // the mimeType fix in create/page.tsx), and ffmpeg/ffprobe's format
+  // auto-detection isn't 100% reliable for every container without a
+  // matching extension hint, especially raw ADTS AAC streams. Hardcoding
+  // ".webm" here regardless of the actual upload was silently breaking
+  // duration detection (and the render itself) for iPhone-recorded
+  // prayers.
+  let audioExt = ".webm";
+  try {
+    audioExt = path.extname(new URL(audioAsset.storage_url).pathname) || ".webm";
+  } catch {
+    // Malformed URL is unexpected but shouldn't crash the render — fall
+    // back to the old default extension.
+  }
+  const audioPath = path.join(workDir, `audio${audioExt}`);
   await downloadFile(audioAsset.storage_url, audioPath);
 
   const duration = await getAudioDuration(audioPath);
@@ -698,13 +713,68 @@ async function downloadFile(url, destPath) {
 }
 
 async function getAudioDuration(audioPath) {
-  const { stdout } = await execFileAsync("ffprobe", [
-    "-v", "quiet",
-    "-show_entries", "format=duration",
-    "-of", "csv=p=0",
-    audioPath,
-  ]);
-  return parseFloat(stdout.trim());
+  // Primary path: ask ffprobe for the container-level duration. This is
+  // fast and works for the vast majority of files, but some MediaRecorder
+  // outputs (notably iPhone Safari's audio/mp4 or raw ADTS AAC) can lack a
+  // usable duration in the container metadata even though the audio itself
+  // is fine.
+  try {
+    const { stdout } = await execFileAsync("ffprobe", [
+      "-v", "quiet",
+      "-show_entries", "format=duration",
+      "-of", "csv=p=0",
+      audioPath,
+    ]);
+    const duration = parseFloat(stdout.trim());
+    if (duration > 0) return duration;
+  } catch {
+    // fall through to the decode-based fallback below
+  }
+
+  // Fallback: same idea, but read the stream's own duration instead of the
+  // container/format-level one — covers files where only the audio stream
+  // carries a duration.
+  try {
+    const { stdout } = await execFileAsync("ffprobe", [
+      "-v", "quiet",
+      "-select_streams", "a:0",
+      "-show_entries", "stream=duration",
+      "-of", "csv=p=0",
+      audioPath,
+    ]);
+    const duration = parseFloat(stdout.trim());
+    if (duration > 0) return duration;
+  } catch {
+    // fall through to the full-decode fallback below
+  }
+
+  // Last resort: actually decode the whole file to silence and read how
+  // much audio ffmpeg reports it processed (the last "time=" in its stats
+  // output). Slower, but reliable even for streams with no duration
+  // metadata at all (e.g. raw ADTS AAC) — this forces a full read of the
+  // file rather than trusting header/container metadata.
+  try {
+    const { stdout, stderr } = await execFileAsync("ffmpeg", [
+      "-v", "info",
+      "-stats",
+      "-i", audioPath,
+      "-f", "null",
+      "-",
+    ]);
+    const output = `${stdout || ""}${stderr || ""}`;
+    const matches = [...output.matchAll(/time=(\d+):(\d+):(\d+\.?\d*)/g)];
+    const last = matches[matches.length - 1];
+    if (last) {
+      const [, hours, minutes, seconds] = last;
+      const duration = Number(hours) * 3600 + Number(minutes) * 60 + Number(seconds);
+      if (duration > 0) return duration;
+    }
+  } catch {
+    // Genuinely unreadable/corrupt audio — give up and let the caller
+    // surface "Could not determine audio duration."
+  }
+
+  return null;
 }
 
 async function updateJob(id, fields) {
