@@ -222,7 +222,7 @@ async function renderPrayer(job, workDir) {
   const { data: prayer, error: prayerError } = await supabase
     .from("prayers")
     .select(
-      "id, user_id, title, recipient_name, transcript, captions, word_timings, style_id, music_style_id, photo_asset_url, text_style, accent_color"
+      "id, user_id, title, recipient_name, include_recipient_in_title, transcript, captions, word_timings, style_id, music_style_id, photo_asset_url, text_style, accent_color"
     )
     .eq("id", job.prayer_id)
     .single();
@@ -315,9 +315,15 @@ async function renderPrayer(job, workDir) {
   // through, the title/prayer text need to actually be part of the video
   // itself to show up there at all. Reusing/resharing a rendered video with
   // a different recipient does mean re-rendering it — that's the tradeoff.
+  // The recipient's name only shows up here if the user explicitly opted in
+  // at creation time (include_recipient_in_title) — off by default, since
+  // most prayers get shared with whoever the user likes, not just the one
+  // person named at creation (see 0013 migration).
   const title =
     prayer.title ||
-    (prayer.recipient_name ? `A Prayer for ${prayer.recipient_name}` : "A Prayer");
+    (prayer.include_recipient_in_title && prayer.recipient_name
+      ? `A Prayer for ${prayer.recipient_name}`
+      : "A Prayer");
   const titlePath = path.join(workDir, "title.txt");
   const displayTitle = textStyle.uppercase ? title.toUpperCase() : title;
   // Long titles at fontsize 64 easily exceed the 1080px frame width, which

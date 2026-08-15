@@ -40,7 +40,9 @@ export default async function PrayerDetailPage({
   const captions = (prayer.captions as CaptionSegment[] | null) ?? [];
   const displayTitle =
     prayer.title ||
-    (prayer.recipient_name ? `A Prayer for ${prayer.recipient_name}` : "Untitled Prayer");
+    (prayer.include_recipient_in_title && prayer.recipient_name
+      ? `A Prayer for ${prayer.recipient_name}`
+      : "Untitled Prayer");
 
   return (
     <>

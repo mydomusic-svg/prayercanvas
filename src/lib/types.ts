@@ -22,6 +22,10 @@ export interface Prayer {
   id: string;
   user_id: string;
   recipient_name: string | null;
+  // Whether recipient_name is allowed to show up in the generated title and
+  // get burned into the rendered video/thumbnail (see 0013 migration) — off
+  // by default so a prayer stays generic enough to reshare with anyone.
+  include_recipient_in_title: boolean;
   occasion: string | null;
   title: string | null;
   transcript: string | null;

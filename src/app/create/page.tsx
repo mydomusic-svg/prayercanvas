@@ -91,6 +91,12 @@ export default function CreatePrayerPage() {
   const supabase = createClient();
 
   const [recipientName, setRecipientName] = useState("");
+  // Off by default: most prayers get shared with whoever the user likes, not
+  // just the one person named here, and the title/text is burned directly
+  // into the rendered video (see worker/index.js) — so an unwanted name in
+  // the title means re-rendering to fix it, not just a quick edit. Only
+  // opt the name into the title/video when the user explicitly asks for it.
+  const [includeRecipientInTitle, setIncludeRecipientInTitle] = useState(false);
   const [occasion, setOccasion] = useState("");
   const [styles, setStyles] = useState<Style[]>([]);
   // The video style picker is category-only now (see selectStyleCategory) —
@@ -261,6 +267,7 @@ export default function CreatePrayerPage() {
         .insert({
           user_id: user.id,
           recipient_name: recipientName || null,
+          include_recipient_in_title: Boolean(recipientName.trim()) && includeRecipientInTitle,
           occasion: occasion || null,
           style_id: styleId,
           music_style_id: selectedMusicStyleId,
@@ -386,6 +393,23 @@ export default function CreatePrayerPage() {
             className="rounded-lg border border-sage-300 px-4 py-2 text-base"
           />
         </label>
+
+        {recipientName.trim() && (
+          <label className="flex items-start gap-2 text-sm text-sage-600">
+            <input
+              type="checkbox"
+              checked={includeRecipientInTitle}
+              onChange={(e) => setIncludeRecipientInTitle(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0"
+            />
+            <span>
+              Show &ldquo;{recipientName.trim()}&rdquo; in the video&apos;s title.
+              {" "}If checked, their name will be burned into the video and
+              its thumbnail — leave unchecked to keep the title generic so
+              you can share this prayer with anyone.
+            </span>
+          </label>
+        )}
 
         <label className="flex flex-col gap-1 text-sm">
           Occasion (optional)

@@ -14,7 +14,9 @@ export default async function SharedPrayerPage({
 
   const { data: shareLink } = await supabase
     .from("share_links")
-    .select("*, prayers(title, recipient_name, transcript, accent_color, text_style)")
+    .select(
+      "*, prayers(title, recipient_name, include_recipient_in_title, transcript, accent_color, text_style)"
+    )
     .eq("token", token)
     .maybeSingle();
 
@@ -41,6 +43,7 @@ export default async function SharedPrayerPage({
   const prayer = shareLink.prayers as {
     title: string | null;
     recipient_name: string | null;
+    include_recipient_in_title: boolean;
     transcript: string | null;
     accent_color: AccentColor | null;
     text_style: TextStyle | null;
@@ -48,7 +51,9 @@ export default async function SharedPrayerPage({
 
   const displayTitle =
     prayer.title ||
-    (prayer.recipient_name ? `A Prayer for ${prayer.recipient_name}` : "A Prayer");
+    (prayer.include_recipient_in_title && prayer.recipient_name
+      ? `A Prayer for ${prayer.recipient_name}`
+      : "A Prayer");
 
   return (
     <>

@@ -14,7 +14,7 @@ export default async function DashboardPage() {
 
   const { data: prayers } = await supabase
     .from("prayers")
-    .select("id, recipient_name, occasion, title, theme, created_at")
+    .select("id, recipient_name, include_recipient_in_title, occasion, title, theme, created_at")
     .eq("user_id", user.id)
     .order("created_at", { ascending: false });
 

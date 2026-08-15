@@ -26,7 +26,7 @@ export async function POST(
   // RLS ensures this only returns a row if the caller owns it.
   const { data: prayer, error: prayerError } = await supabase
     .from("prayers")
-    .select("id, recipient_name, occasion")
+    .select("id, recipient_name, include_recipient_in_title, occasion")
     .eq("id", id)
     .single();
 
@@ -83,9 +83,15 @@ export async function POST(
       `Whisper: ${segments.length} segment(s), ${words.length} word(s) for a ${audioBuffer.byteLength}-byte clip.`
     );
 
+    // The recipient's name is only allowed to appear in the AI-generated
+    // title when the user explicitly opted in at creation time (see the
+    // checkbox in create/page.tsx) — otherwise it's passed to analyzePrayer
+    // purely as unnamed context, same as before, so the title stays generic
+    // enough to reshare with anyone.
     const { theme, title } = await analyzePrayer({
       transcript,
       recipientName: prayer.recipient_name,
+      includeRecipientName: prayer.include_recipient_in_title,
       occasion: prayer.occasion,
     });
 

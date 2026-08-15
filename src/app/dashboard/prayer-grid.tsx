@@ -10,6 +10,7 @@ import type { RenderJob } from "@/lib/types";
 type PrayerCard = {
   id: string;
   recipient_name: string | null;
+  include_recipient_in_title: boolean;
   occasion: string | null;
   title: string | null;
   theme: string | null;
@@ -140,7 +141,7 @@ export default function PrayerGrid({
             const job = jobs[prayer.id];
             const displayTitle =
               prayer.title ||
-              (prayer.recipient_name
+              (prayer.include_recipient_in_title && prayer.recipient_name
                 ? `A Prayer for ${prayer.recipient_name}`
                 : "Untitled Prayer");
             const isSelected = selected.has(prayer.id);
