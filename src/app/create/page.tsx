@@ -107,6 +107,13 @@ export default function CreatePrayerPage() {
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
 
+  // A user-uploaded photo is an alternative to picking a library style —
+  // selecting one clears selectedStyleId (see handlePhotoUpload) and the
+  // worker renders it with a Ken Burns pan/zoom effect instead of using a
+  // library video (0012_photo_upload.sql).
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+
   const [submitting, setSubmitting] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -193,6 +200,22 @@ export default function CreatePrayerPage() {
     setRecordingState("recorded");
   }
 
+  function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoFile(file);
+    setPhotoPreviewUrl(URL.createObjectURL(file));
+    // A photo replaces the library style pick, not adds to it — the worker
+    // treats photo_asset_url and style_id as mutually exclusive backgrounds.
+    setSelectedStyleId(null);
+  }
+
+  function selectLibraryStyle(styleId: string) {
+    setSelectedStyleId(styleId);
+    setPhotoFile(null);
+    setPhotoPreviewUrl(null);
+  }
+
   async function handleSubmit() {
     if (!audioBlob) {
       setError("Record or upload a prayer first.");
@@ -231,7 +254,35 @@ export default function CreatePrayerPage() {
 
       if (prayerError || !prayer) throw prayerError;
 
-      // 2. Upload the raw audio to Storage. The extension has to match the
+      // 2. If the user chose "Upload your own photo" instead of a library
+      //    style, upload it to Storage and record its URL on the prayer row
+      //    — the render worker (worker/index.js) checks photo_asset_url
+      //    first and, when set, generates a Ken Burns pan/zoom background
+      //    from it instead of downloading a library style's video.
+      if (photoFile) {
+        const photoExt = photoFile.name.split(".").pop()?.toLowerCase() || "jpg";
+        const photoPath = `${user.id}/${prayer.id}/photo.${photoExt}`;
+        const { error: photoUploadError } = await supabase.storage
+          .from("prayer-photos")
+          .upload(photoPath, photoFile, {
+            contentType: photoFile.type || "image/jpeg",
+          });
+
+        if (photoUploadError) throw photoUploadError;
+
+        const { data: photoPublicUrl } = supabase.storage
+          .from("prayer-photos")
+          .getPublicUrl(photoPath);
+
+        const { error: photoUpdateError } = await supabase
+          .from("prayers")
+          .update({ photo_asset_url: photoPublicUrl.publicUrl })
+          .eq("id", prayer.id);
+
+        if (photoUpdateError) throw photoUpdateError;
+      }
+
+      // 3. Upload the raw audio to Storage. The extension has to match the
       //    actual container (see extensionForMimeType above) — Whisper
       //    transcription downstream infers the audio format from this
       //    filename, so a mismatched extension (e.g. always ".webm" for an
@@ -248,7 +299,7 @@ export default function CreatePrayerPage() {
         .from("prayer-audio")
         .getPublicUrl(path);
 
-      // 3. Record the media asset.
+      // 4. Record the media asset.
       const { error: assetError } = await supabase.from("media_assets").insert({
         prayer_id: prayer.id,
         type: "raw_audio",
@@ -257,7 +308,7 @@ export default function CreatePrayerPage() {
 
       if (assetError) throw assetError;
 
-      // 4. Kick off transcription + theme detection (Sprint 2). The render
+      // 5. Kick off transcription + theme detection (Sprint 2). The render
       //    job itself is created server-side by this route, ONLY after
       //    transcript/captions/word_timings/title are all written — NOT
       //    here. Creating it here (as this used to) raced the render
@@ -402,10 +453,40 @@ export default function CreatePrayerPage() {
               </div>
             )}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {/* Always visible regardless of the active category filter,
+                  so switching back to your own photo doesn't require
+                  hunting for a specific category. */}
+              <label
+                className={`flex cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden rounded-lg border px-2 py-3 text-center text-sm transition ${
+                  photoFile
+                    ? "border-sage-600 bg-sage-600 text-white"
+                    : "border-dashed border-sage-400 text-sage-600 hover:bg-sage-50"
+                }`}
+              >
+                {photoPreviewUrl ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element -- local object URL preview, not a remote/optimizable image */}
+                    <img
+                      src={photoPreviewUrl}
+                      alt=""
+                      className="h-16 w-16 rounded object-cover"
+                    />
+                    <span className="text-xs">Your photo (tap to change)</span>
+                  </>
+                ) : (
+                  <span>📷 Upload your own photo</span>
+                )}
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handlePhotoUpload}
+                  className="hidden"
+                />
+              </label>
               {visibleStyles.map((style) => (
                 <button
                   key={style.id}
-                  onClick={() => setSelectedStyleId(style.id)}
+                  onClick={() => selectLibraryStyle(style.id)}
                   className={`rounded-lg border px-4 py-3 text-sm transition ${
                     selectedStyleId === style.id
                       ? "border-sage-600 bg-sage-600 text-white"
@@ -416,6 +497,12 @@ export default function CreatePrayerPage() {
                 </button>
               ))}
             </div>
+            {photoFile && (
+              <p className="text-xs text-sage-400">
+                Your photo will move with a gentle pan &amp; zoom (Ken Burns)
+                effect instead of using a library video.
+              </p>
+            )}
           </section>
         );
       })()}

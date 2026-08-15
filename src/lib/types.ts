@@ -30,6 +30,10 @@ export interface Prayer {
   word_timings: WordTiming[] | null;
   style_id: string | null;
   music_style_id: string | null;
+  // Set when the user uploaded their own photo instead of picking a library
+  // style — the render worker turns it into a Ken Burns pan/zoom background
+  // instead of downloading a library video (see 0012_photo_upload.sql).
+  photo_asset_url: string | null;
   text_style: TextStyle;
   accent_color: AccentColor | null;
   privacy: Privacy;

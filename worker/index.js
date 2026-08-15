@@ -7,7 +7,9 @@
 //      one word at a time in sync with the speech (Sprint 3.6) when
 //      word-level timestamps are available, falling back to whole-sentence
 //      captions (Sprint 2) for older prayers that don't have them
-//   3. muxes the original voice recording as the audio track
+//   3. muxes the original voice recording as the audio track — run through
+//      a light compressor + touch of reverb (see buildFilterComplex) —
+//      applied to every render, not opt-in
 //   4. uploads the finished MP4 to Supabase Storage and marks the job complete
 //
 // Background video + music per style come from the `styles` table
@@ -15,6 +17,13 @@
 // with real licensed clips (Pexels video, incompetech.com music — see
 // /credits in the app). Falls back to a procedural solid-color background
 // and no music bed for any style that hasn't been seeded yet.
+//
+// Alternatively, a prayer can carry its own uploaded photo instead of a
+// library style (`prayers.photo_asset_url` — see 0012_photo_upload.sql and
+// the "Upload your own photo" tile on the create page). When set, it takes
+// priority over any style video: generateKenBurnsClip() turns the still
+// photo into a short pan/zoom video first, which then flows through the
+// exact same pipeline a library style's video would.
 //
 // Required env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 // Optional: POLL_INTERVAL_MS (default 5000)
@@ -198,7 +207,7 @@ async function renderPrayer(job, workDir) {
   const { data: prayer, error: prayerError } = await supabase
     .from("prayers")
     .select(
-      "id, user_id, title, recipient_name, transcript, captions, word_timings, style_id, music_style_id, text_style, accent_color"
+      "id, user_id, title, recipient_name, transcript, captions, word_timings, style_id, music_style_id, photo_asset_url, text_style, accent_color"
     )
     .eq("id", job.prayer_id)
     .single();
@@ -330,12 +339,26 @@ async function renderPrayer(job, workDir) {
     wordFiles.push({ path: wordPath, start, end });
   }
 
-  // Download the real background video / music for this style, if the
-  // `styles` row has been seeded with them (see scripts/seed-style-assets.mjs).
-  // Falls back to the Sprint 3 procedural solid-color background and no
-  // music bed when a style hasn't been seeded yet.
+  // Background: a user-uploaded photo (0012_photo_upload.sql) takes
+  // priority over a library style's video — the create page only lets one
+  // be chosen at a time, but prefer the more specific explicit choice
+  // defensively in case a prayer somehow has both. Falls back further to
+  // the real background video for this style if seeded (see
+  // scripts/seed-style-assets.mjs), then to the Sprint 3 procedural
+  // solid-color background if neither is set.
   let backgroundVideoPath = null;
-  if (visualAssetUrl) {
+  if (prayer.photo_asset_url) {
+    let photoExt = ".jpg";
+    try {
+      photoExt = path.extname(new URL(prayer.photo_asset_url).pathname) || ".jpg";
+    } catch {
+      // Malformed URL is unexpected but shouldn't crash the render.
+    }
+    const photoPath = path.join(workDir, `photo${photoExt}`);
+    await downloadFile(prayer.photo_asset_url, photoPath);
+    backgroundVideoPath = path.join(workDir, "kenburns.mp4");
+    await generateKenBurnsClip(photoPath, backgroundVideoPath);
+  } else if (visualAssetUrl) {
     backgroundVideoPath = path.join(workDir, "background.mp4");
     await downloadFile(visualAssetUrl, backgroundVideoPath);
   }
@@ -588,6 +611,65 @@ async function generateThumbnail({
   ]);
 }
 
+// A generated Ken Burns clip only needs to be a handful of seconds — like
+// the real stock video clips, it gets looped by the same `-stream_loop -1
+// ... -t duration` logic in renderPrayer to fill however long the prayer
+// actually is, so there's no need to render one as long as the speech.
+const KEN_BURNS_CLIP_SECONDS = 8;
+const KEN_BURNS_FPS = 30;
+
+// A handful of pan directions (start-corner/edge -> center-ish), expressed
+// as ffmpeg zoompan x/y expressions in terms of the current `zoom` value so
+// the pan tracks correctly as the zoom itself animates over the clip.
+const KEN_BURNS_PANS = [
+  { x: "iw/2-(iw/zoom/2)", y: "ih/2-(ih/zoom/2)" }, // center
+  { x: "0", y: "ih/2-(ih/zoom/2)" }, // drift right (start pinned left)
+  { x: "iw-(iw/zoom)", y: "ih/2-(ih/zoom/2)" }, // drift left (start pinned right)
+  { x: "iw/2-(iw/zoom/2)", y: "0" }, // drift down (start pinned top)
+  { x: "iw/2-(iw/zoom/2)", y: "ih-(ih/zoom)" }, // drift up (start pinned bottom)
+];
+
+/**
+ * Turns a single uploaded photo into a short vertical video with a gentle,
+ * randomized pan/zoom (Ken Burns) motion, using ffmpeg's zoompan filter.
+ * The randomization (zoom in vs out, and pan direction) is re-rolled on
+ * every render, so re-rendering the same prayer doesn't look identical.
+ *
+ * zoompan's z expression uses `on` (the output frame number) directly with
+ * d=1, rather than the more commonly-copied `zoom+0.001`-style incremental
+ * expression with d>1 — the latter recomputes zoom in discrete jumps every
+ * d frames, which reads as a stepped/jerky motion instead of a smooth pan.
+ */
+async function generateKenBurnsClip(photoPath, outputPath) {
+  const zoomIn = Math.random() < 0.6; // slight bias toward zoom-in — reads better in a portrait frame than zooming out from an already-tight crop
+  const startZoom = zoomIn ? 1.0 : 1.25;
+  const endZoom = zoomIn ? 1.25 : 1.0;
+  const pan = KEN_BURNS_PANS[Math.floor(Math.random() * KEN_BURNS_PANS.length)];
+
+  const totalFrames = KEN_BURNS_CLIP_SECONDS * KEN_BURNS_FPS;
+  const zoomExpr = `${startZoom}+(${endZoom - startZoom})*on/${totalFrames}`;
+
+  // Pre-scale well above the 1080x1920 output (1.5x) so zoompan's crop at
+  // up to 1.25x zoom still samples from real pixels instead of upscaling a
+  // frame that's already at output size — same treatment the real stock
+  // video clips get from the scale+crop step in buildFilterComplex, just
+  // applied here since a still photo has no such step of its own.
+  const vf =
+    `scale=1620:2880:force_original_aspect_ratio=increase,crop=1620:2880,` +
+    `zoompan=z='${zoomExpr}':d=1:x='${pan.x}':y='${pan.y}':s=1080x1920:fps=${KEN_BURNS_FPS},` +
+    `format=yuv420p`;
+
+  await execFileAsync("ffmpeg", [
+    "-y",
+    "-loop", "1",
+    "-i", photoPath,
+    "-vf", vf,
+    "-t", String(KEN_BURNS_CLIP_SECONDS),
+    "-r", String(KEN_BURNS_FPS),
+    outputPath,
+  ]);
+}
+
 /**
  * Truncates transcript text to roughly maxChars, breaking on a word
  * boundary and adding an ellipsis, so a very long prayer's thumbnail text
@@ -678,19 +760,40 @@ function buildFilterComplex({
     "[vfinal]"
   );
 
-  // Audio: voice is input 1 always. Music, when present, is input 2 — duck
-  // it well under the voice (18%) and mix rather than replace, so the
-  // prayer itself always stays clearly audible.
+  // Audio: voice is input 1 always. Run it through a light compressor +
+  // touch of reverb first (applied to every recording, not opt-in — see
+  // session notes) before any music gets mixed in:
+  //   - acompressor: gentle 3:1 ratio with a fairly low threshold, so quiet
+  //     mumbled passages get pulled up and loud passages get pulled down —
+  //     real dynamic control, not just a volume boost — which matters a lot
+  //     given these recordings come from all kinds of phone mics/rooms.
+  //   - aecho, as a lightweight stand-in for a proper reverb (ffmpeg's
+  //     stock build has no true reverb filter — afreeverb isn't actually
+  //     compiled in, confirmed empirically against the same ffmpeg build
+  //     the Dockerfile installs before relying on it here): three very
+  //     short, quiet taps under ffmpeg's typical echo-fusion threshold
+  //     (~15-55ms) read as a bit of room tone rather than a discrete echo.
+  //     in_gain=1 keeps the dry voice at full level; out_gain=0.15 keeps
+  //     the added reflections subtle. Too much here gets muddy fast on top
+  //     of already-compressed speech.
+  filters.push(
+    `[1:a]acompressor=threshold=0.1:ratio=3:attack=20:release=250:knee=6:makeup=2,` +
+      `aecho=in_gain=1:out_gain=0.15:delays=15|35|55:decays=0.25|0.15|0.08[voice]`
+  );
+
+  // Music, when present, is input 2 — duck it well under the voice (18%)
+  // and mix rather than replace, so the prayer itself always stays clearly
+  // audible.
   if (hasMusic) {
     filters.push(`[2:a]volume=0.18[music]`);
     // normalize=0: amix defaults to auto-scaling every input down by 1/N,
     // which would quietly halve the voice track on top of our explicit
     // music duck above — disable that so only our 0.18 ducking applies.
     filters.push(
-      `[1:a][music]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[aout]`
+      `[voice][music]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[aout]`
     );
   } else {
-    filters.push(`[1:a]anull[aout]`);
+    filters.push(`[voice]anull[aout]`);
   }
 
   return filters.join(";");
