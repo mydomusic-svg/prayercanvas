@@ -53,6 +53,12 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 const FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
 const FONT_REGULAR = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+// Bundled (not from apt — see worker/fonts/) so the title/thumbnail can
+// look like an actual designed prayer card instead of plain DejaVu text.
+const FONT_CALLIGRAPHY = path.join(
+  import.meta.dirname,
+  "fonts/GreatVibes-Regular.ttf"
+);
 const FONT_SERIF = path.join(
   import.meta.dirname,
   "fonts/PlayfairDisplay-Regular.ttf"
@@ -64,16 +70,17 @@ const FONT_SERIF = path.join(
 // even once it's downloaded and shared outside the app (e.g. re-posted to
 // social media with no link back to the site).
 const WATERMARK_PATH = path.join(import.meta.dirname, "brand/logo-mark.png");
-// The per-text-style title fonts (GreatVibes/Montserrat/Caveat) and the
-// accent color palette used to live here — they were only ever used to
-// render the title into the video/thumbnail pixels, which this worker no
-// longer does (see the note above renderPrayer's call site: the title is
-// shown as live, editable page text + a player overlay instead, specifically
-// so it can't go stale/wrong if a prayer gets reshared with someone else).
-// The canonical color hexes (gold 0xf5c451, rose 0xe98a9c, sky 0x8ecae6,
-// sage 0x8fbf8f, ivory 0xffffff) and font choices still live in the
-// AccentColor/TextStyle types and create-page UI on the app side, which is
-// what actually renders the title now.
+// Text-style presets — chosen by the user on the create page before
+// rendering, so the title (both in-video and on the thumbnail) can look
+// intentional rather than always defaulting to the calligraphy look.
+const FONT_MODERN = path.join(
+  import.meta.dirname,
+  "fonts/Montserrat-ExtraBold.ttf"
+);
+const FONT_HANDWRITTEN = path.join(
+  import.meta.dirname,
+  "fonts/Caveat-Bold.ttf"
+);
 
 // Procedural background theme per style — no stock assets required.
 const STYLE_THEMES = {
@@ -85,6 +92,56 @@ const STYLE_THEMES = {
   peaceful: { bg: "0x24425c", text: "white", accent: "0xf5c451" },
 };
 const DEFAULT_THEME = { bg: "0x2f4a3e", text: "white", accent: "0xf5c451" };
+
+// Title font per text style, plus the sizing/wrapping each font needs to
+// look right — Caveat and Montserrat read very differently from the
+// calligraphy script at the same pixel size, so each preset tunes its own.
+// Sizes/outline (titleBorderW) tuned after a real render came back with the
+// title nearly invisible: light accent colors (gold/sky/ivory) have almost
+// no contrast on their own against a light/foggy background clip. A dark
+// outline + drop shadow guarantees the title reads regardless of accent
+// color or background brightness.
+const TEXT_STYLES = {
+  calligraphy: {
+    font: FONT_CALLIGRAPHY,
+    videoFontSize: 72,
+    videoWrapChars: 18,
+    thumbFontSize: 84,
+    thumbWrapChars: 17,
+    titleBorderW: 5,
+    uppercase: false,
+  },
+  modern: {
+    font: FONT_MODERN,
+    videoFontSize: 50,
+    videoWrapChars: 14,
+    thumbFontSize: 56,
+    thumbWrapChars: 13,
+    titleBorderW: 3,
+    uppercase: true,
+  },
+  handwritten: {
+    font: FONT_HANDWRITTEN,
+    videoFontSize: 78,
+    videoWrapChars: 17,
+    thumbFontSize: 88,
+    thumbWrapChars: 16,
+    titleBorderW: 4,
+    uppercase: false,
+  },
+};
+const DEFAULT_TEXT_STYLE = TEXT_STYLES.calligraphy;
+
+// Accent color choices offered on the create page — applied to the title in
+// both the video and its thumbnail. Curated (rather than a free color
+// picker) so every combination still reads clearly against every theme.
+const ACCENT_COLORS = {
+  gold: "0xf5c451",
+  rose: "0xe98a9c",
+  sky: "0x8ecae6",
+  sage: "0x8fbf8f",
+  ivory: "0xffffff",
+};
 
 // Railway sends SIGTERM to the old container during a rolling deploy and
 // expects it to exit. Without a handler, Node's default SIGTERM behavior
@@ -206,11 +263,8 @@ async function renderPrayer(job, workDir) {
   }
   const theme =
     STYLE_THEMES[(styleName ?? "").toLowerCase()] ?? DEFAULT_THEME;
-  // text_style/accent_color are no longer used to render anything here —
-  // the title (which was their only consumer) isn't burned into the video
-  // or thumbnail pixels anymore (see the note above). They're still stored
-  // on the prayer and available for the front-end title overlay to use if
-  // it wants to keep that personalization, just not baked in by the worker.
+  const textStyle = TEXT_STYLES[prayer.text_style] ?? DEFAULT_TEXT_STYLE;
+  const accentColor = ACCENT_COLORS[prayer.accent_color] ?? theme.accent;
 
   const { data: audioAsset, error: audioError } = await supabase
     .from("media_assets")
@@ -251,16 +305,51 @@ async function renderPrayer(job, workDir) {
 
   await updateJob(job.id, { progress: 30 });
 
-  // The title/recipient name is deliberately NOT burned into the video or
-  // thumbnail pixels (see buildFilterComplex/generateThumbnail below) — it
-  // used to be, but that meant a prayer recorded for one person and later
-  // reused/reshared for someone else would permanently show the first
-  // recipient's name baked into the media file, with no way to fix it short
-  // of re-rendering. The title is shown instead as ordinary page text
-  // (already editable in place via EditableTitle on the owner's page, and
-  // read fresh from `prayers.title`/`recipient_name` on the public share
-  // page and the branded video player overlay) so changing it takes effect
-  // everywhere instantly, no re-render needed.
+  // Title is burned directly into the video (and thumbnail) again — an
+  // earlier version of this pipeline made it a live page/player overlay
+  // instead, purely as text, so it could be edited/reshared without
+  // re-rendering. But a recipient who receives the video as a native file
+  // (AirDropped, texted, downloaded — not opened through the app's own
+  // pages) never sees any of that HTML; they only ever see the actual video
+  // pixels. Since that's the common real-world path prayers get shared
+  // through, the title/prayer text need to actually be part of the video
+  // itself to show up there at all. Reusing/resharing a rendered video with
+  // a different recipient does mean re-rendering it — that's the tradeoff.
+  const title =
+    prayer.title ||
+    (prayer.recipient_name ? `A Prayer for ${prayer.recipient_name}` : "A Prayer");
+  const titlePath = path.join(workDir, "title.txt");
+  const displayTitle = textStyle.uppercase ? title.toUpperCase() : title;
+  // Long titles at fontsize 64 easily exceed the 1080px frame width, which
+  // pushes drawtext's centering x=(w-text_w)/2 negative and clips both
+  // edges (seen in production — "Abundance Flows Through Your Work" only
+  // showed "ndance Flows Through Your W"). Wrap greedily onto multiple
+  // centered lines instead of shrinking to illegibility. The wrap width is
+  // per text-style since each title font has a different average glyph
+  // width at its own font size.
+  const wrappedTitle = wrapText(displayTitle, textStyle.videoWrapChars);
+  await writeFile(titlePath, wrappedTitle, "utf8");
+  // Long titles wrap onto 3+ lines (e.g. "Bryan, Your Wonderful Day Awaits"
+  // in the calligraphy font at a large size). The opening card's scrim/body
+  // used to start at a fixed y regardless of title height, so a tall title
+  // ran straight into the body text. buildFilterComplex uses this to push
+  // the opening card down by however much room the actual wrapped title
+  // needs.
+  const titleLineCount = wrappedTitle.split("\n").length;
+
+  // "Opening card": the prayer text itself, shown with a scrim behind it
+  // only for the first few seconds of the video (see OPENING_CARD_SECONDS
+  // in buildFilterComplex). This is what makes the video's own native
+  // thumbnail/poster — generated by iMessage, Photos, or any other app from
+  // an early video frame, completely outside our control — show the full
+  // prayer text "at rest" instead of a blank background frame, matching
+  // the in-app thumbnail's look.
+  const openingBodyPath = path.join(workDir, "opening-body.txt");
+  await writeFile(
+    openingBodyPath,
+    wrapText(truncateForThumbnail(prayer.transcript ?? "", 260), 26),
+    "utf8"
+  );
 
   const captions = Array.isArray(prayer.captions) ? prayer.captions : [];
   const captionFiles = [];
@@ -336,6 +425,11 @@ async function renderPrayer(job, workDir) {
   const logoInputIndex = musicPath ? 3 : 2;
   const filterComplex = buildFilterComplex({
     theme,
+    textStyle,
+    accentColor,
+    titlePath,
+    titleLineCount,
+    openingBodyPath,
     captionFiles,
     wordFiles,
     hasBackgroundVideo: Boolean(backgroundVideoPath),
@@ -437,16 +531,17 @@ async function renderPrayer(job, workDir) {
   await updateJob(job.id, { progress: 75 });
 
   // Thumbnail (poster image): a single still frame from the same background,
-  // with the prayer text in a readable serif underneath a dark/light scrim
-  // — so the prayer can be read without pressing play, and the video's own
-  // artwork carries into the thumbnail instead of a generic placeholder
-  // frame. No title/recipient name here (see the note above renderPrayer)
-  // — that's shown as live page text + a player overlay instead, so it
-  // stays correct even if the prayer gets reshared with someone else.
+  // with the title in the chosen accent font and the prayer text in a
+  // readable serif underneath a dark/light scrim — so the prayer can be
+  // read without pressing play, and the video's own artwork carries into
+  // the thumbnail instead of a generic placeholder frame.
   const thumbnailPath = path.join(workDir, "thumbnail.jpg");
   await generateThumbnail({
     workDir,
     theme,
+    textStyle,
+    accentColor,
+    title: displayTitle,
     transcript: prayer.transcript ?? "",
     backgroundVideoPath,
     outputPath: thumbnailPath,
@@ -536,21 +631,29 @@ async function renderPrayer(job, workDir) {
 /**
  * Renders a single still-frame JPEG "poster" for the prayer: a frame from
  * the same background art (or theme color, for styles without real footage)
- * with the prayer text in a readable serif underneath a scrim, so the video
- * is legible without pressing play. Deliberately has no title/recipient
- * name burned in — see the note above renderPrayer's call site.
+ * with the title in the chosen accent font and the prayer text in a
+ * readable serif underneath a scrim, so the video is legible without
+ * pressing play.
  */
 async function generateThumbnail({
   workDir,
   theme,
+  textStyle,
+  accentColor,
+  title,
   transcript,
   backgroundVideoPath,
   outputPath,
 }) {
+  const titleLinesPath = path.join(workDir, "thumb-title.txt");
+  const wrappedTitle = wrapText(title, textStyle.thumbWrapChars);
+  await writeFile(titleLinesPath, wrappedTitle, "utf8");
+  const titleLineCount = wrappedTitle.split("\n").length;
+
   const bodyLinesPath = path.join(workDir, "thumb-body.txt");
   await writeFile(
     bodyLinesPath,
-    wrapText(truncateForThumbnail(transcript, 320), 30),
+    wrapText(truncateForThumbnail(transcript, 260), 30),
     "utf8"
   );
 
@@ -583,19 +686,38 @@ async function generateThumbnail({
     filters.push(`[0:v]${BG_BLUR}[bg]`);
     currentLabel = "bg";
   }
-  // Scrim area shifted taller/higher now that there's no title above it —
-  // the prayer text is the only thing in this band, so it's centered in a
-  // slightly larger, more vertically-centered card area.
   filters.push(
-    `[${currentLabel}]drawbox=x=0:y=560:w=1080:h=900:color=${scrimColor}:t=fill[s1]`
+    `[${currentLabel}]drawbox=x=0:y=440:w=1080:h=1040:color=${scrimColor}:t=fill[s1]`
   );
+  // Keeps the user's picked accent color (personalization) for the title —
+  // the dark outline + shadow guarantees legibility regardless of which
+  // color was picked or how bright the background photo happens to be.
   filters.push(
-    `[s1]drawtext=textfile='${bodyLinesPath}':fontfile='${FONT_SERIF}':fontsize=42:fontcolor=${theme.text}:line_spacing=22:x=(w-text_w)/2:y=670[s2]`
+    `[s1]drawtext=textfile='${titleLinesPath}':fontfile='${textStyle.font}':fontsize=${textStyle.thumbFontSize}:fontcolor=${accentColor}:` +
+      `bordercolor=black@0.55:borderw=${textStyle.titleBorderW}:shadowcolor=black@0.35:shadowx=2:shadowy=2:` +
+      `line_spacing=6:x=(w-text_w)/2:y=530[s2]`
   );
-  // Same brand watermark as the video itself (see buildFilterComplex) —
-  // input 1 is the logo image, added below.
+  // Body text used to start at a fixed y=830 regardless of the title's
+  // actual height. A short title left enough clearance, but a long one
+  // wrapped onto 3 lines (e.g. a calligraphy-font title at thumbFontSize 84)
+  // ran straight into the body — the "Awaits" line overlapping "Heavenly
+  // Father, we come to" in a real test render. Push the body down based on
+  // the wrapped title's real line count instead of assuming it's always
+  // short.
+  const TITLE_TOP_Y = 530;
+  const titleBlockHeight = titleLineCount * (textStyle.thumbFontSize * 1.25 + 6);
+  const bodyY = Math.round(TITLE_TOP_Y + titleBlockHeight + 40);
+  filters.push(
+    `[s2]drawtext=textfile='${bodyLinesPath}':fontfile='${FONT_SERIF}':fontsize=40:fontcolor=${theme.text}:line_spacing=20:x=(w-text_w)/2:y=${bodyY}[s3]`
+  );
+  // Same brand watermark as the video itself (icon + spelled-out name — see
+  // buildFilterComplex) — input 1 is the logo image, added below.
   filters.push(`[1:v]scale=120:-1,format=rgba,colorchannelmixer=aa=0.8[logo]`);
-  filters.push(`[s2][logo]overlay=W-w-36:H-h-56[out]`);
+  filters.push(`[s3][logo]overlay=W-w-36:H-h-56[s4]`);
+  filters.push(
+    `[s4]drawtext=text='PrayerMessenger':fontfile='${FONT_BOLD}':fontsize=28:fontcolor=white@0.85:` +
+      `bordercolor=black@0.5:borderw=2:x=w-text_w-36:y=h-196[out]`
+  );
 
   const inputArgs = backgroundVideoPath
     ? // A couple seconds in tends to avoid a black fade-in frame at t=0.
@@ -692,8 +814,21 @@ function truncateForThumbnail(text, maxChars) {
  * generated background, using textfile= so we never have to hand-escape
  * arbitrary prayer text for ffmpeg's filter syntax.
  */
+// How long the "opening card" (prayer text + scrim, see buildFilterComplex)
+// stays on screen at the start of the video. Long enough that a recipient
+// who receives this as a native file (texted/AirDropped, not opened through
+// the app) and taps into the video, or whose messaging app grabs an early
+// frame for its own preview thumbnail, actually gets a readable few seconds
+// of the prayer text rather than a half-second flash of it.
+const OPENING_CARD_SECONDS = 3.2;
+
 function buildFilterComplex({
   theme,
+  textStyle,
+  accentColor,
+  titlePath,
+  titleLineCount = 1,
+  openingBodyPath,
   captionFiles,
   wordFiles = [],
   hasBackgroundVideo = false,
@@ -715,10 +850,58 @@ function buildFilterComplex({
     currentLabel = "bg";
   }
 
-  // No title burned in here (see the note above renderPrayer's call site) —
-  // deliberately dropped so a prayer's title/recipient name stays editable
-  // and reshareable without ever needing to re-render the video itself.
-  let nextLabel;
+  let nextLabel = "v0";
+
+  // Title uses the user's chosen text-style font + accent color, for the
+  // whole video (not just an opening card) — matches the thumbnail so the
+  // video and its poster look like a matched set. Dark outline + drop
+  // shadow guarantee it reads regardless of accent color or background
+  // brightness (see TEXT_STYLES' titleBorderW comment above).
+  filters.push(
+    `[${currentLabel}]drawtext=textfile='${titlePath}':fontfile='${textStyle.font}':fontsize=${textStyle.videoFontSize}:fontcolor=${accentColor}:` +
+      `bordercolor=black@0.55:borderw=${textStyle.titleBorderW}:shadowcolor=black@0.35:shadowx=2:shadowy=2:` +
+      `x=(w-text_w)/2:y=140:line_spacing=10[${nextLabel}]`
+  );
+  currentLabel = nextLabel;
+
+  // "Opening card": scrim + the prayer text itself, visible only for the
+  // first OPENING_CARD_SECONDS. This is what makes the video's own native
+  // thumbnail/poster frame (generated by iMessage/Photos/etc. from an early
+  // frame, entirely outside our control once the file leaves the app) show
+  // the full prayer text "at rest" instead of just the bare background —
+  // matching what the in-app thumbnail already looks like.
+  if (openingBodyPath) {
+    // The scrim/body used to start at a fixed y=460 regardless of how tall
+    // the title above it rendered. A short one-line title left plenty of
+    // room, but a long title wrapped onto 3+ lines (seen with "Bryan, Your
+    // Wonderful Day Awaits" in the calligraphy font) ran straight into the
+    // body text. Push the card down based on the title's actual wrapped
+    // line count instead of assuming it's always short. The multiplier is a
+    // conservative per-line height estimate (font size plus drawtext's own
+    // line_spacing=10 plus a little slack for descenders/swashes on the
+    // script fonts); the bottom edge stays anchored near the captions area
+    // so the card never grows unboundedly for very long titles.
+    const TITLE_TOP_Y = 140;
+    const titleBlockHeight = titleLineCount * (textStyle.videoFontSize * 1.25 + 10);
+    const cardTop = Math.max(460, Math.round(TITLE_TOP_Y + titleBlockHeight + 40));
+    const cardBottom = 1460;
+    const cardHeight = Math.max(200, cardBottom - cardTop);
+    const bodyY = cardTop + 100;
+
+    const scrimColor = theme.text === "black" ? "white@0.6" : "black@0.42";
+    nextLabel = "vcard1";
+    filters.push(
+      `[${currentLabel}]drawbox=x=0:y=${cardTop}:w=1080:h=${cardHeight}:color=${scrimColor}:t=fill:` +
+        `enable='lt(t,${OPENING_CARD_SECONDS})'[${nextLabel}]`
+    );
+    currentLabel = nextLabel;
+    nextLabel = "vcard2";
+    filters.push(
+      `[${currentLabel}]drawtext=textfile='${openingBodyPath}':fontfile='${FONT_SERIF}':fontsize=40:fontcolor=${theme.text}:` +
+        `line_spacing=20:x=(w-text_w)/2:y=${bodyY}:enable='lt(t,${OPENING_CARD_SECONDS})'[${nextLabel}]`
+    );
+    currentLabel = nextLabel;
+  }
 
   // Prefer word-level highlighting (Sprint 3.6): one word on screen at a
   // time, in a gold highlight box, exactly timed to Whisper's per-word
@@ -748,17 +931,26 @@ function buildFilterComplex({
     });
   }
 
-  // Brand watermark: small, semi-transparent logo mark in the bottom-right
-  // corner, composited on top of everything else (background + title +
-  // captions) so it reads clearly regardless of what's behind it at any
-  // given moment. Applied last, right before the vfinal rename below, so it
-  // sits above the whole stack rather than getting drawn over by captions.
+  // Brand watermark: small, semi-transparent logo mark PLUS the actual
+  // words "PrayerMessenger" (not just the icon — recipients who don't
+  // recognize the mark on sight still see the app name spelled out) in the
+  // bottom-right corner, composited on top of everything else (background +
+  // title + captions) so it reads clearly regardless of what's behind it at
+  // any given moment. Applied last, right before the vfinal rename below,
+  // so it sits above the whole stack rather than getting drawn over.
   if (logoInputIndex != null) {
     filters.push(
       `[${logoInputIndex}:v]scale=120:-1,format=rgba,colorchannelmixer=aa=0.8[wm]`
     );
-    filters.push(`[${currentLabel}][wm]overlay=W-w-36:H-h-56[vwm]`);
-    currentLabel = "vwm";
+    nextLabel = "vwmlogo";
+    filters.push(`[${currentLabel}][wm]overlay=W-w-36:H-h-56[${nextLabel}]`);
+    currentLabel = nextLabel;
+    nextLabel = "vwmtext";
+    filters.push(
+      `[${currentLabel}]drawtext=text='PrayerMessenger':fontfile='${FONT_BOLD}':fontsize=28:fontcolor=white@0.85:` +
+        `bordercolor=black@0.5:borderw=2:x=w-text_w-36:y=h-196[${nextLabel}]`
+    );
+    currentLabel = nextLabel;
   }
 
   // Rename the last stage's output to the fixed label we map from.
