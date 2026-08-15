@@ -24,7 +24,7 @@ export default function CreditsPage() {
   return (
     <>
       <HeroBanner variant="slim" />
-      <main className="mx-auto flex min-h-screen max-w-xl flex-col gap-8 px-6 py-16">
+      <main className="mx-auto flex min-h-dvh max-w-xl flex-col gap-8 px-6 py-16">
       <div>
         <h1 className="text-2xl font-semibold">Credits</h1>
         <p className="mt-2 text-sm text-sage-500">

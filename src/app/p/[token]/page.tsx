@@ -44,7 +44,7 @@ export default async function SharedPrayerPage({
   return (
     <>
       <HeroBanner variant="slim" />
-      <main className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center gap-6 px-6 text-center">
+      <main className="mx-auto flex min-h-dvh max-w-xl flex-col items-center justify-center gap-6 px-6 text-center">
       <h1 className="text-2xl font-semibold">
         {prayer.title ||
           (prayer.recipient_name

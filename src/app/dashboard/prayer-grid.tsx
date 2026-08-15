@@ -246,7 +246,13 @@ export default function PrayerGrid({
       )}
 
       {selectMode && selected.size > 0 && (
-        <div className="sticky bottom-4 z-10 flex items-center justify-between gap-3 rounded-full border border-sage-200 bg-white px-5 py-3 shadow-lg">
+        <div
+          className="sticky z-10 flex items-center justify-between gap-3 rounded-full border border-sage-200 bg-white px-5 py-3 shadow-lg"
+          // A plain `bottom-4` sits right at the edge of the home-indicator
+          // swipe zone on iPhone — this keeps a consistent 1rem gap above
+          // the actual safe area instead of the physical screen edge.
+          style={{ bottom: "calc(1rem + env(safe-area-inset-bottom))" }}
+        >
           <span className="text-sm text-sage-600">
             {selected.size} selected
           </span>

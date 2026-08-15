@@ -45,7 +45,7 @@ export default async function PrayerDetailPage({
   return (
     <>
       <HeroBanner variant="slim" />
-      <main className="mx-auto flex min-h-screen max-w-xl flex-col gap-6 px-6 py-16">
+      <main className="mx-auto flex min-h-dvh max-w-xl flex-col gap-6 px-6 py-16">
       <div className="flex items-start justify-between gap-4">
         <EditableTitle prayerId={prayer.id} title={displayTitle} />
         {prayer.theme && (

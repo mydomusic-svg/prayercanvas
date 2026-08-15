@@ -41,7 +41,7 @@ export default async function PricingPage() {
   return (
     <>
       <HeroBanner variant="slim" />
-      <main className="mx-auto flex min-h-screen max-w-4xl flex-col gap-10 px-6 py-16">
+      <main className="mx-auto flex min-h-dvh max-w-4xl flex-col gap-10 px-6 py-16">
         <div className="text-center">
           <h1 className="font-headline text-3xl font-bold text-sage-900 sm:text-4xl">
             Pricing

@@ -47,7 +47,7 @@ export default async function DashboardPage() {
   return (
     <>
       <HeroBanner variant="slim" />
-      <main className="mx-auto flex min-h-screen max-w-4xl flex-col gap-8 px-6 py-16">
+      <main className="mx-auto flex min-h-dvh max-w-4xl flex-col gap-8 px-6 py-16">
         <PrayerGrid prayers={prayers ?? []} jobs={jobs} userId={user.id} />
       </main>
     </>

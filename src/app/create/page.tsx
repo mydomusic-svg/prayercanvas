@@ -272,17 +272,21 @@ export default function CreatePrayerPage() {
   return (
     <>
       <HeroBanner variant="slim" />
-      <main className="mx-auto flex min-h-screen max-w-xl flex-col gap-8 px-6 py-16">
+      <main className="mx-auto flex min-h-dvh max-w-xl flex-col gap-8 px-6 py-16">
         <h1 className="text-2xl font-semibold">Create a Prayer</h1>
 
       <section className="flex flex-col gap-4">
         <label className="flex flex-col gap-1 text-sm">
           Recipient (optional)
+          {/* text-base is required here, not cosmetic: Tailwind's preflight
+              makes inputs inherit font-size from their parent (this label,
+              at text-sm/14px), and any input under 16px makes iOS Safari
+              forcibly zoom the whole page in when it's focused. */}
           <input
             value={recipientName}
             onChange={(e) => setRecipientName(e.target.value)}
             placeholder="e.g. Marcus"
-            className="rounded-lg border border-sage-300 px-4 py-2"
+            className="rounded-lg border border-sage-300 px-4 py-2 text-base"
           />
         </label>
 
@@ -292,7 +296,7 @@ export default function CreatePrayerPage() {
             value={occasion}
             onChange={(e) => setOccasion(e.target.value)}
             placeholder="e.g. New job"
-            className="rounded-lg border border-sage-300 px-4 py-2"
+            className="rounded-lg border border-sage-300 px-4 py-2 text-base"
           />
         </label>
       </section>
