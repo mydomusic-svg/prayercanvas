@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import HeroBanner from "../../hero-banner";
+import PrayerVideoPlayer from "../../prayer-video-player";
 
 export default async function SharedPrayerPage({
   params,
@@ -59,13 +60,15 @@ export default async function SharedPrayerPage({
         // `muted`) just never start — controls alone are more predictable
         // everywhere. playsInline is required on iOS Safari specifically;
         // without it, tapping play forces the video into iOS's fullscreen
-        // native player instead of playing in the page.
-        <video
+        // native player instead of playing in the page. The poster image
+        // (render_jobs.thumbnail_url) is generated once per render and
+        // reused for every viewer of this link — it already has the title
+        // and full prayer text composited onto it (see worker/index.js
+        // generateThumbnail), so anyone opening the link sees the prayer
+        // text at rest, before ever pressing play, not just the sender.
+        <PrayerVideoPlayer
           src={renderJob.output_url}
-          poster={renderJob.thumbnail_url ?? undefined}
-          controls
-          playsInline
-          className="w-full rounded-xl"
+          poster={renderJob.thumbnail_url}
         />
       ) : (
         <p className="text-sage-500">This prayer is still being prepared.</p>
@@ -80,8 +83,6 @@ export default async function SharedPrayerPage({
           {prayer.transcript}
         </p>
       ) : null}
-
-      <p className="text-sm text-sage-400">Made with PrayerMessenger</p>
       </main>
     </>
   );

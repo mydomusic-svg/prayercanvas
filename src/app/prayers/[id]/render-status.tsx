@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { RenderJob } from "@/lib/types";
 import ShareButton from "./share-button";
 import PrayerActions from "../../prayer-actions";
+import PrayerVideoPlayer from "../../prayer-video-player";
 
 // Polls for render_jobs updates instead of leaving the user staring at a
 // static "Queued" message with no way to know when (or whether) their video
@@ -60,13 +61,7 @@ export default function RenderStatus({
   if (job.status === "complete" && job.output_url) {
     return (
       <div className="mt-3 flex flex-col gap-3">
-        <video
-          src={job.output_url}
-          poster={job.thumbnail_url ?? undefined}
-          controls
-          playsInline
-          className="w-full rounded-lg"
-        />
+        <PrayerVideoPlayer src={job.output_url} poster={job.thumbnail_url} />
         <div className="flex flex-wrap items-center gap-2">
           <PrayerActions
             prayerId={prayerId}

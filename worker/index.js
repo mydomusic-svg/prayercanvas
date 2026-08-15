@@ -63,6 +63,13 @@ const FONT_SERIF = path.join(
   import.meta.dirname,
   "fonts/PlayfairDisplay-Regular.ttf"
 );
+// Small brand watermark burned into every rendered video and thumbnail
+// (bottom-right corner, semi-transparent) — same mark used in the app's own
+// header/login screens (public/logo-mark.png), copied into the worker image
+// via worker/brand/ so a render is unambiguously "from PrayerMessenger"
+// even once it's downloaded and shared outside the app (e.g. re-posted to
+// social media with no link back to the site).
+const WATERMARK_PATH = path.join(import.meta.dirname, "brand/logo-mark.png");
 // Text-style presets (Sprint 3.8) — chosen by the user on the create page
 // before rendering, so the title (both in-video and on the thumbnail) can
 // look intentional rather than always defaulting to the calligraphy look.
@@ -371,6 +378,11 @@ async function renderPrayer(job, workDir) {
   await updateJob(job.id, { progress: 40 });
 
   const outputPath = path.join(workDir, "output.mp4");
+  // Input order (fixed by the order -i flags are given below): 0 = the
+  // background video/color, 1 = voice audio, 2 = music (only if present),
+  // then the watermark logo image last — whatever index that ends up being
+  // is what buildFilterComplex needs to reference it as `[N:v]`.
+  const logoInputIndex = musicPath ? 3 : 2;
   const filterComplex = buildFilterComplex({
     theme,
     textStyle,
@@ -380,6 +392,7 @@ async function renderPrayer(job, workDir) {
     wordFiles,
     hasBackgroundVideo: Boolean(backgroundVideoPath),
     hasMusic: Boolean(musicPath),
+    logoInputIndex,
   });
 
   await updateJob(job.id, { progress: 45 });
@@ -397,6 +410,12 @@ async function renderPrayer(job, workDir) {
     audioInputArgs.push("-stream_loop", "-1", "-i", musicPath, "-t", duration.toFixed(2));
   }
 
+  // Watermark logo input, always last (see logoInputIndex above). -loop 1
+  // keeps this single still frame available for the whole render; -shortest
+  // on the final ffmpeg call (below) still caps overall output length to
+  // the actual voice/video duration, not this otherwise-infinite loop.
+  const logoInputArgs = ["-loop", "1", "-i", WATERMARK_PATH];
+
   // Diagnostic: word/caption counts and filter_complex length, so we can
   // confirm from Railway logs alone whether the word-highlight path was
   // actually taken and whether ffmpeg raised any font/filter warnings —
@@ -411,6 +430,7 @@ async function renderPrayer(job, workDir) {
       "-y",
       ...inputArgs,
       ...audioInputArgs,
+      ...logoInputArgs,
       "-filter_complex", filterComplex,
       "-map", "[vfinal]",
       "-map", "[aout]",
@@ -436,6 +456,21 @@ async function renderPrayer(job, workDir) {
       // Spoken word doesn't need 192k; 128k is still clean for voice+music
       // and shaves a bit more off the file size.
       "-b:a", "128k",
+      // Explicit OUTPUT-level duration cap, not just "-shortest". ffmpeg
+      // binds a bare "-t"/"-stream_loop" etc. to whichever "-i" comes NEXT
+      // on the command line, not the one before it — so inputArgs'/
+      // audioInputArgs' trailing "-t" flags above only ever capped the
+      // *following* input (harmlessly redundant, since voice/music are
+      // already ~`duration` long). The render was actually being capped by
+      // a different accident: with nothing after it, a trailing "-t" with
+      // no further "-i" is read as an OUTPUT option instead. Adding the
+      // watermark logo as one more input after audioInputArgs put an "-i"
+      // after that trailing "-t", silently turning it back into an (again
+      // redundant) input option and removing the real cap — the render
+      // then ran until something else stopped it instead of stopping at
+      // `duration`. An explicit "-t" here doesn't depend on argument order
+      // at all, so it can't be broken again by adding another input later.
+      "-t", duration.toFixed(2),
       "-shortest",
       outputPath,
     ]);
@@ -582,29 +617,42 @@ async function generateThumbnail({
   // text stays readable; dark themes need a dark scrim under white text.
   const scrimColor = theme.text === "black" ? "white@0.6" : "black@0.42";
 
+  // Switched from a plain -vf chain to -filter_complex with labeled pads:
+  // the watermark overlay below needs a second input (the logo image), and
+  // -vf only supports a single-input filter chain.
   const filters = [];
+  let currentLabel = "0:v";
   if (backgroundVideoPath) {
     filters.push(
-      "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1"
+      `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[bg]`
     );
+    currentLabel = "bg";
   }
-  filters.push(`drawbox=x=0:y=440:w=1080:h=1040:color=${scrimColor}:t=fill`);
   filters.push(
-    `drawtext=textfile='${titleLinesPath}':fontfile='${textStyle.font}':fontsize=${textStyle.thumbFontSize}:fontcolor=${accentColor}:line_spacing=6:x=(w-text_w)/2:y=530`
+    `[${currentLabel}]drawbox=x=0:y=440:w=1080:h=1040:color=${scrimColor}:t=fill[s1]`
   );
   filters.push(
-    `drawtext=textfile='${bodyLinesPath}':fontfile='${FONT_SERIF}':fontsize=40:fontcolor=${theme.text}:line_spacing=20:x=(w-text_w)/2:y=830`
+    `[s1]drawtext=textfile='${titleLinesPath}':fontfile='${textStyle.font}':fontsize=${textStyle.thumbFontSize}:fontcolor=${accentColor}:line_spacing=6:x=(w-text_w)/2:y=530[s2]`
   );
+  filters.push(
+    `[s2]drawtext=textfile='${bodyLinesPath}':fontfile='${FONT_SERIF}':fontsize=40:fontcolor=${theme.text}:line_spacing=20:x=(w-text_w)/2:y=830[s3]`
+  );
+  // Same brand watermark as the video itself (see buildFilterComplex) —
+  // input 1 is the logo image, added below.
+  filters.push(`[1:v]scale=120:-1,format=rgba,colorchannelmixer=aa=0.8[logo]`);
+  filters.push(`[s3][logo]overlay=W-w-36:H-h-56[out]`);
 
   const inputArgs = backgroundVideoPath
     ? // A couple seconds in tends to avoid a black fade-in frame at t=0.
       ["-ss", "1.5", "-i", backgroundVideoPath]
     : ["-f", "lavfi", "-i", `color=c=${theme.bg}:s=1080x1920:d=1:r=1`];
+  inputArgs.push("-i", WATERMARK_PATH);
 
   await execFileAsync("ffmpeg", [
     "-y",
     ...inputArgs,
-    "-vf", filters.join(","),
+    "-filter_complex", filters.join(";"),
+    "-map", "[out]",
     "-frames:v", "1",
     "-q:v", "3",
     outputPath,
@@ -698,6 +746,7 @@ function buildFilterComplex({
   wordFiles = [],
   hasBackgroundVideo = false,
   hasMusic = false,
+  logoInputIndex = null,
 }) {
   const filters = [];
   let currentLabel = "0:v";
@@ -751,6 +800,19 @@ function buildFilterComplex({
       );
       currentLabel = nextLabel;
     });
+  }
+
+  // Brand watermark: small, semi-transparent logo mark in the bottom-right
+  // corner, composited on top of everything else (background + title +
+  // captions) so it reads clearly regardless of what's behind it at any
+  // given moment. Applied last, right before the vfinal rename below, so it
+  // sits above the whole stack rather than getting drawn over by captions.
+  if (logoInputIndex != null) {
+    filters.push(
+      `[${logoInputIndex}:v]scale=120:-1,format=rgba,colorchannelmixer=aa=0.8[wm]`
+    );
+    filters.push(`[${currentLabel}][wm]overlay=W-w-36:H-h-56[vwm]`);
+    currentLabel = "vwm";
   }
 
   // Rename the last stage's output to the fixed label we map from.
