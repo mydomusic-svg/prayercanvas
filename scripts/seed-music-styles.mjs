@@ -47,7 +47,7 @@ const TRACKS = {
   Piano: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Meditation%20Impromptu%2001.mp3",
   Ukulele: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Local%20Forecast.mp3",
   Ambient: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Wallpaper.mp3",
-  Classical: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Canon%20in%20D%20Pachelbel.mp3",
+  Classical: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Canon%20in%20D%20Major.mp3",
 };
 
 async function downloadTo(url, destPath) {
@@ -74,45 +74,57 @@ async function main() {
   const workDir = await mkdtemp(path.join(tmpdir(), "music-styles-"));
   console.log(`Working in ${workDir}`);
 
+  const failed = [];
+
   for (const [name, url] of Object.entries(TRACKS)) {
     console.log(`\n${name}:`);
+    try {
+      const musicLocal = path.join(workDir, `${name}.mp3`);
 
-    const musicLocal = path.join(workDir, `${name}.mp3`);
+      console.log("  downloading...");
+      const bytes = await downloadTo(url, musicLocal);
+      console.log(`  size: ${(bytes / 1024 / 1024).toFixed(1)} MB`);
 
-    console.log("  downloading...");
-    const bytes = await downloadTo(url, musicLocal);
-    console.log(`  size: ${(bytes / 1024 / 1024).toFixed(1)} MB`);
+      const storagePath = `music/${name.toLowerCase()}.mp3`;
 
-    const storagePath = `music/${name.toLowerCase()}.mp3`;
+      console.log("  uploading to Supabase Storage...");
+      const musicUrl = await uploadToStorage(musicLocal, storagePath, "audio/mpeg");
 
-    console.log("  uploading to Supabase Storage...");
-    const musicUrl = await uploadToStorage(musicLocal, storagePath, "audio/mpeg");
-
-    console.log("  upserting music_styles row...");
-    const { data: existing } = await supabase
-      .from("music_styles")
-      .select("id")
-      .eq("name", name)
-      .maybeSingle();
-
-    if (existing) {
-      const { error } = await supabase
+      console.log("  upserting music_styles row...");
+      const { data: existing } = await supabase
         .from("music_styles")
-        .update({ music_asset: musicUrl })
-        .eq("id", existing.id);
-      if (error) throw new Error(`Failed to update music_styles row for ${name}: ${error.message}`);
-    } else {
-      const { error } = await supabase
-        .from("music_styles")
-        .insert({ name, music_asset: musicUrl });
-      if (error) throw new Error(`Failed to insert music_styles row for ${name}: ${error.message}`);
+        .select("id")
+        .eq("name", name)
+        .maybeSingle();
+
+      if (existing) {
+        const { error } = await supabase
+          .from("music_styles")
+          .update({ music_asset: musicUrl })
+          .eq("id", existing.id);
+        if (error) throw new Error(`Failed to update music_styles row for ${name}: ${error.message}`);
+      } else {
+        const { error } = await supabase
+          .from("music_styles")
+          .insert({ name, music_asset: musicUrl });
+        if (error) throw new Error(`Failed to insert music_styles row for ${name}: ${error.message}`);
+      }
+
+      console.log(`  done: ${name} -> ${musicUrl}`);
+    } catch (err) {
+      console.error(`  FAILED: ${name}: ${err.message}`);
+      failed.push(name);
     }
-
-    console.log(`  done: ${name} -> ${musicUrl}`);
   }
 
   await rm(workDir, { recursive: true, force: true });
-  console.log(`\nAll ${Object.keys(TRACKS).length} new music styles seeded.`);
+
+  const succeeded = Object.keys(TRACKS).length - failed.length;
+  console.log(`\n${succeeded}/${Object.keys(TRACKS).length} music styles seeded.`);
+  if (failed.length) {
+    console.log(`Failed (swap the URL in TRACKS and re-run): ${failed.join(", ")}`);
+    process.exitCode = 1;
+  }
 }
 
 main().catch((err) => {
