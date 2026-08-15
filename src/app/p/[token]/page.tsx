@@ -12,7 +12,7 @@ export default async function SharedPrayerPage({
 
   const { data: shareLink } = await supabase
     .from("share_links")
-    .select("*, prayers(*)")
+    .select("*, prayers(title, recipient_name, transcript)")
     .eq("token", token)
     .maybeSingle();
 
@@ -39,6 +39,7 @@ export default async function SharedPrayerPage({
   const prayer = shareLink.prayers as {
     title: string | null;
     recipient_name: string | null;
+    transcript: string | null;
   };
 
   return (
@@ -69,6 +70,16 @@ export default async function SharedPrayerPage({
       ) : (
         <p className="text-sage-500">This prayer is still being prepared.</p>
       )}
+
+      {prayer.transcript ? (
+        // Always-visible text version of the prayer, independent of video
+        // playback state — some visitors want to read along or read instead
+        // of watching/listening (e.g. quiet environments, hearing
+        // difficulty, or just preferring text).
+        <p className="w-full whitespace-pre-wrap rounded-lg bg-sage-50 p-4 text-left text-sage-700">
+          {prayer.transcript}
+        </p>
+      ) : null}
 
       <p className="text-sm text-sage-400">Made with PrayerMessenger</p>
       </main>

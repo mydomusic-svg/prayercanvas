@@ -760,40 +760,57 @@ function buildFilterComplex({
     "[vfinal]"
   );
 
-  // Audio: voice is input 1 always. Run it through a light compressor +
-  // touch of reverb first (applied to every recording, not opt-in — see
-  // session notes) before any music gets mixed in:
-  //   - acompressor: gentle 3:1 ratio with a fairly low threshold, so quiet
-  //     mumbled passages get pulled up and loud passages get pulled down —
-  //     real dynamic control, not just a volume boost — which matters a lot
-  //     given these recordings come from all kinds of phone mics/rooms.
+  // Audio: voice is input 1 always. Run it through a compressor + touch of
+  // room tone first (applied to every recording, not opt-in — see session
+  // notes), then, if there's a music bed, duck it dynamically under the
+  // voice with a sidechain compressor rather than a flat static volume cut:
+  //   - acompressor: 4:1 ratio with makeup=3 (real gain boost, not just
+  //     evening things out) — quiet mumbled passages get pulled up, loud
+  //     passages get pulled down, and the result is louder overall, which
+  //     matters a lot given these recordings come from all kinds of phone
+  //     mics/rooms and users reported the voice getting buried under music.
   //   - aecho, as a lightweight stand-in for a proper reverb (ffmpeg's
   //     stock build has no true reverb filter — afreeverb isn't actually
-  //     compiled in, confirmed empirically against the same ffmpeg build
-  //     the Dockerfile installs before relying on it here): three very
-  //     short, quiet taps under ffmpeg's typical echo-fusion threshold
-  //     (~15-55ms) read as a bit of room tone rather than a discrete echo.
-  //     in_gain=1 keeps the dry voice at full level; out_gain=0.15 keeps
-  //     the added reflections subtle. Too much here gets muddy fast on top
-  //     of already-compressed speech.
+  //     compiled in, confirmed empirically against the ffmpeg build the
+  //     Dockerfile installs). CAUTION, confirmed empirically: aecho's
+  //     out_gain scales the ENTIRE output (dry voice included), not just
+  //     the added echo taps as its docs read at a glance — out_gain=0.15 (a
+  //     previous version of this code) was silently crushing the whole
+  //     voice track to ~15% level, which was very likely the real cause of
+  //     "music overpowering the vocals": the music's static duck was tuned
+  //     against a full-level voice that, after this filter, was no longer
+  //     full level. out_gain MUST stay at 1 — use small `decays` values
+  //     instead to keep the echo taps themselves subtle relative to the
+  //     now-correctly-full-level dry signal.
+  //   - sidechaincompress (only with a music bed): ffmpeg does not allow
+  //     reusing one filter output as the input to two different filters —
+  //     asplit makes the two copies this needs (one to actually mix in, one
+  //     as the sidechain key). The music bed only ducks WHILE the voice is
+  //     actually speaking (fast attack, slower release) and returns to its
+  //     fuller base level during pauses, instead of sitting at one flat
+  //     quiet level for the entire prayer regardless of whether anyone's
+  //     talking at that instant.
   filters.push(
-    `[1:a]acompressor=threshold=0.1:ratio=3:attack=20:release=250:knee=6:makeup=2,` +
-      `aecho=in_gain=1:out_gain=0.15:delays=15|35|55:decays=0.25|0.15|0.08[voice]`
+    `[1:a]acompressor=threshold=0.08:ratio=4:attack=15:release=200:knee=6:makeup=3,` +
+      `aecho=in_gain=1:out_gain=1:delays=15|35|55:decays=0.15|0.08|0.04[voice_proc]`
   );
 
-  // Music, when present, is input 2 — duck it well under the voice (18%)
-  // and mix rather than replace, so the prayer itself always stays clearly
-  // audible.
   if (hasMusic) {
-    filters.push(`[2:a]volume=0.18[music]`);
-    // normalize=0: amix defaults to auto-scaling every input down by 1/N,
-    // which would quietly halve the voice track on top of our explicit
-    // music duck above — disable that so only our 0.18 ducking applies.
+    filters.push(`[voice_proc]asplit=2[voice][voice_sc]`);
+    filters.push(`[2:a]volume=0.22[music_pre]`);
     filters.push(
-      `[voice][music]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[aout]`
+      `[music_pre][voice_sc]sidechaincompress=threshold=0.03:ratio=10:attack=5:release=400:makeup=1[music]`
+    );
+    // normalize=0: amix defaults to auto-scaling every input down by 1/N,
+    // which would quietly halve the voice track on top of the ducking
+    // above — disable that so only the explicit levels above apply.
+    // alimiter guards against clipping now that the voice is boosted well
+    // above unity by the compressor's makeup gain.
+    filters.push(
+      `[voice][music]amix=inputs=2:duration=first:dropout_transition=2:normalize=0,alimiter=limit=0.97[aout]`
     );
   } else {
-    filters.push(`[voice]anull[aout]`);
+    filters.push(`[voice_proc]alimiter=limit=0.97[aout]`);
   }
 
   return filters.join(";");
