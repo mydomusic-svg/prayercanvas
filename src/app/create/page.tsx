@@ -93,8 +93,13 @@ export default function CreatePrayerPage() {
   const [recipientName, setRecipientName] = useState("");
   const [occasion, setOccasion] = useState("");
   const [styles, setStyles] = useState<Style[]>([]);
-  const [selectedStyleId, setSelectedStyleId] = useState<string | null>(null);
-  const [styleCategory, setStyleCategory] = useState<string | null>(null);
+  // The video style picker is category-only now (see selectStyleCategory) —
+  // a specific clip within the chosen category is picked at random at
+  // submit time (pickRandomStyleId), so the UI never needs to show or track
+  // an individual style row's id.
+  const [selectedStyleCategory, setSelectedStyleCategory] = useState<
+    string | null
+  >(null);
   const [musicStyles, setMusicStyles] = useState<MusicStyle[]>([]);
   const [selectedMusicStyleId, setSelectedMusicStyleId] = useState<string | null>(
     null
@@ -107,10 +112,10 @@ export default function CreatePrayerPage() {
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
 
-  // A user-uploaded photo is an alternative to picking a library style —
-  // selecting one clears selectedStyleId (see handlePhotoUpload) and the
-  // worker renders it with a Ken Burns pan/zoom effect instead of using a
-  // library video (0012_photo_upload.sql).
+  // A user-uploaded photo is an alternative to picking a library style
+  // category — photoFile takes priority at submit time (see handleSubmit)
+  // and the worker renders it with a Ken Burns pan/zoom effect instead of
+  // using a library video (0012_photo_upload.sql).
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
 
@@ -131,8 +136,7 @@ export default function CreatePrayerPage() {
         if (data) {
           setStyles(data as Style[]);
           if (data.length > 0) {
-            setSelectedStyleId(data[0].id);
-            setStyleCategory(data[0].category ?? null);
+            setSelectedStyleCategory(data[0].category ?? null);
           }
         }
       });
@@ -205,15 +209,26 @@ export default function CreatePrayerPage() {
     if (!file) return;
     setPhotoFile(file);
     setPhotoPreviewUrl(URL.createObjectURL(file));
-    // A photo replaces the library style pick, not adds to it — the worker
-    // treats photo_asset_url and style_id as mutually exclusive backgrounds.
-    setSelectedStyleId(null);
   }
 
-  function selectLibraryStyle(styleId: string) {
-    setSelectedStyleId(styleId);
+  function selectStyleCategory(category: string) {
+    setSelectedStyleCategory(category);
     setPhotoFile(null);
     setPhotoPreviewUrl(null);
+  }
+
+  // The picker only shows category tiles ("Celebration", "Nature", ...) —
+  // not every individual clip in the library — for a clean, simple layout.
+  // The actual clip is picked randomly from that category right at submit
+  // time, so re-generating (or just creating another prayer with the same
+  // category) doesn't always use the exact same background.
+  function pickRandomStyleId(category: string | null): string | null {
+    if (styles.length === 0) return null;
+    const pool = category
+      ? styles.filter((s) => (s.category || "Other") === category)
+      : styles;
+    const options = pool.length > 0 ? pool : styles;
+    return options[Math.floor(Math.random() * options.length)].id;
   }
 
   async function handleSubmit() {
@@ -236,14 +251,18 @@ export default function CreatePrayerPage() {
         return;
       }
 
-      // 1. Create the prayer row.
+      // 1. Create the prayer row. The style picker only shows categories
+      //    (see selectStyleCategory) — the specific clip within that
+      //    category is randomized here, at the last possible moment, rather
+      //    than when the category was clicked.
+      const styleId = photoFile ? null : pickRandomStyleId(selectedStyleCategory);
       const { data: prayer, error: prayerError } = await supabase
         .from("prayers")
         .insert({
           user_id: user.id,
           recipient_name: recipientName || null,
           occasion: occasion || null,
-          style_id: selectedStyleId,
+          style_id: styleId,
           music_style_id: selectedMusicStyleId,
           text_style: textStyle,
           accent_color: accentColor,
@@ -425,37 +444,18 @@ export default function CreatePrayerPage() {
       </section>
 
       {styles.length > 0 && (() => {
+        // One tile per category (e.g. "Celebration"), not one per clip —
+        // the library has many clips per category (see /credits), which
+        // made this grid long and repetitive. The specific clip is chosen
+        // randomly at submit time (pickRandomStyleId), so picking a
+        // category is still enough to get real variety across prayers.
         const categories = Array.from(
           new Set(styles.map((s) => s.category || "Other"))
         );
-        const visibleStyles = styleCategory
-          ? styles.filter((s) => (s.category || "Other") === styleCategory)
-          : styles;
         return (
           <section className="flex flex-col gap-3">
-            <p className="text-sm font-medium">Choose a style</p>
-            {categories.length > 1 && (
-              <div className="flex flex-wrap gap-2">
-                {categories.map((cat) => (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setStyleCategory(cat)}
-                    className={`rounded-full border px-3 py-1 text-xs transition ${
-                      styleCategory === cat
-                        ? "border-sage-600 bg-sage-600 text-white"
-                        : "border-sage-300 text-sage-600 hover:bg-sage-50"
-                    }`}
-                  >
-                    {cat}
-                  </button>
-                ))}
-              </div>
-            )}
+            <p className="text-sm font-medium">Choose a video style</p>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {/* Always visible regardless of the active category filter,
-                  so switching back to your own photo doesn't require
-                  hunting for a specific category. */}
               <label
                 className={`flex cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden rounded-lg border px-2 py-3 text-center text-sm transition ${
                   photoFile
@@ -483,17 +483,18 @@ export default function CreatePrayerPage() {
                   className="hidden"
                 />
               </label>
-              {visibleStyles.map((style) => (
+              {categories.map((cat) => (
                 <button
-                  key={style.id}
-                  onClick={() => selectLibraryStyle(style.id)}
+                  key={cat}
+                  type="button"
+                  onClick={() => selectStyleCategory(cat)}
                   className={`rounded-lg border px-4 py-3 text-sm transition ${
-                    selectedStyleId === style.id
+                    !photoFile && selectedStyleCategory === cat
                       ? "border-sage-600 bg-sage-600 text-white"
                       : "border-sage-300 hover:bg-sage-50"
                   }`}
                 >
-                  {style.name}
+                  {cat}
                 </button>
               ))}
             </div>
