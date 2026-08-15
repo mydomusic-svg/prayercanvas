@@ -94,10 +94,12 @@ export default function CreatePrayerPage() {
   const [occasion, setOccasion] = useState("");
   const [styles, setStyles] = useState<Style[]>([]);
   const [selectedStyleId, setSelectedStyleId] = useState<string | null>(null);
+  const [styleCategory, setStyleCategory] = useState<string | null>(null);
   const [musicStyles, setMusicStyles] = useState<MusicStyle[]>([]);
   const [selectedMusicStyleId, setSelectedMusicStyleId] = useState<string | null>(
     null
   );
+  const [musicCategory, setMusicCategory] = useState<string | null>(null);
   const [textStyle, setTextStyle] = useState<TextStyle>("calligraphy");
   const [accentColor, setAccentColor] = useState<AccentColor>("gold");
 
@@ -116,23 +118,31 @@ export default function CreatePrayerPage() {
   useEffect(() => {
     supabase
       .from("styles")
-      .select("id, name, visual_asset, music_asset, caption_template")
+      .select("id, name, visual_asset, music_asset, caption_template, category, source, license")
+      .order("category", { ascending: true })
       .then(({ data }) => {
         if (data) {
           setStyles(data as Style[]);
-          if (data.length > 0) setSelectedStyleId(data[0].id);
+          if (data.length > 0) {
+            setSelectedStyleId(data[0].id);
+            setStyleCategory(data[0].category ?? null);
+          }
         }
       });
     // Music is chosen independently of the visual style — see
     // supabase/migrations/0010_music_styles.sql.
     supabase
       .from("music_styles")
-      .select("id, name, music_asset")
+      .select("id, name, music_asset, category, source, license")
+      .order("category", { ascending: true })
       .order("created_at", { ascending: true })
       .then(({ data }) => {
         if (data) {
           setMusicStyles(data as MusicStyle[]);
-          if (data.length > 0) setSelectedMusicStyleId(data[0].id);
+          if (data.length > 0) {
+            setSelectedMusicStyleId(data[0].id);
+            setMusicCategory(data[0].category ?? null);
+          }
         }
       });
   }, [supabase]);
@@ -363,32 +373,83 @@ export default function CreatePrayerPage() {
         </label>
       </section>
 
-      {styles.length > 0 && (
-        <section className="flex flex-col gap-3">
-          <p className="text-sm font-medium">Choose a style</p>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {styles.map((style) => (
-              <button
-                key={style.id}
-                onClick={() => setSelectedStyleId(style.id)}
-                className={`rounded-lg border px-4 py-3 text-sm transition ${
-                  selectedStyleId === style.id
-                    ? "border-sage-600 bg-sage-600 text-white"
-                    : "border-sage-300 hover:bg-sage-50"
-                }`}
-              >
-                {style.name}
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
+      {styles.length > 0 && (() => {
+        const categories = Array.from(
+          new Set(styles.map((s) => s.category || "Other"))
+        );
+        const visibleStyles = styleCategory
+          ? styles.filter((s) => (s.category || "Other") === styleCategory)
+          : styles;
+        return (
+          <section className="flex flex-col gap-3">
+            <p className="text-sm font-medium">Choose a style</p>
+            {categories.length > 1 && (
+              <div className="flex flex-wrap gap-2">
+                {categories.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setStyleCategory(cat)}
+                    className={`rounded-full border px-3 py-1 text-xs transition ${
+                      styleCategory === cat
+                        ? "border-sage-600 bg-sage-600 text-white"
+                        : "border-sage-300 text-sage-600 hover:bg-sage-50"
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {visibleStyles.map((style) => (
+                <button
+                  key={style.id}
+                  onClick={() => setSelectedStyleId(style.id)}
+                  className={`rounded-lg border px-4 py-3 text-sm transition ${
+                    selectedStyleId === style.id
+                      ? "border-sage-600 bg-sage-600 text-white"
+                      : "border-sage-300 hover:bg-sage-50"
+                  }`}
+                >
+                  {style.name}
+                </button>
+              ))}
+            </div>
+          </section>
+        );
+      })()}
 
-      {musicStyles.length > 0 && (
-        <section className="flex flex-col gap-3">
+      {musicStyles.length > 0 && (() => {
+        const categories = Array.from(
+          new Set(musicStyles.map((m) => m.category || "Other"))
+        );
+        const visibleMusicStyles = musicCategory
+          ? musicStyles.filter((m) => (m.category || "Other") === musicCategory)
+          : musicStyles;
+        return (
+      <section className="flex flex-col gap-3">
           <p className="text-sm font-medium">Choose a music style</p>
+          {categories.length > 1 && (
+            <div className="flex flex-wrap gap-2">
+              {categories.map((cat) => (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setMusicCategory(cat)}
+                  className={`rounded-full border px-3 py-1 text-xs transition ${
+                    musicCategory === cat
+                      ? "border-sage-600 bg-sage-600 text-white"
+                      : "border-sage-300 text-sage-600 hover:bg-sage-50"
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {musicStyles.map((musicStyle) => (
+            {visibleMusicStyles.map((musicStyle) => (
               <button
                 key={musicStyle.id}
                 type="button"
@@ -403,8 +464,9 @@ export default function CreatePrayerPage() {
               </button>
             ))}
           </div>
-        </section>
-      )}
+      </section>
+        );
+      })()}
 
       <section className="flex flex-col gap-3">
         <p className="text-sm font-medium">Text style</p>

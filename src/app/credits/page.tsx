@@ -1,30 +1,46 @@
+import { createClient } from "@/lib/supabase/server";
 import HeroBanner from "../hero-banner";
 
 export const metadata = { title: "Credits — PrayerMessenger" };
 
-const VIDEO_CREDITS = [
-  { style: "Nature", title: "Forest stream", source: "Pexels" },
-  { style: "Cinematic", title: "Storm clouds with light rays", source: "Pexels" },
-  { style: "Minimal", title: "Gold bokeh lights", source: "Pexels" },
-  { style: "Celebration", title: "Morning sunshine through foliage", source: "Pexels" },
-  { style: "Scripture", title: "Lit candle", source: "Pexels" },
-  { style: "Peaceful", title: "Sunset clouds", source: "Pexels" },
-];
+// Video/music credits are read directly from the database (styles.source/
+// license, music_styles.source/license — see
+// supabase/migrations/0011_asset_library.sql) so this page stays accurate
+// automatically as the asset library grows, instead of a hand-maintained
+// list that drifts out of sync.
 
-const MUSIC_CREDITS = [
-  { style: "Nature", title: "Windswept" },
-  { style: "Cinematic", title: "Majestic Hills" },
-  { style: "Minimal", title: "Pensif" },
-  { style: "Celebration", title: "Carefree" },
-  { style: "Scripture", title: "Amazing Grace 2011" },
-  { style: "Peaceful", title: "Winter Reflections" },
-  { style: "Piano", title: "Meditation Impromptu 01" },
-  { style: "Ukulele", title: "Local Forecast" },
-  { style: "Ambient", title: "Wallpaper" },
-  { style: "Classical", title: "Canon in D Pachelbel" },
-];
+function groupBySourceLicense<T extends { source: string | null; license: string | null }>(
+  rows: T[]
+) {
+  const groups = new Map<string, T[]>();
+  for (const row of rows) {
+    const key = `${row.source || "Unknown source"}|||${row.license || ""}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(row);
+  }
+  return Array.from(groups.entries()).map(([key, items]) => {
+    const [source, license] = key.split("|||");
+    return { source, license, items };
+  });
+}
 
-export default function CreditsPage() {
+export default async function CreditsPage() {
+  const supabase = await createClient();
+
+  const [{ data: styles }, { data: musicStyles }] = await Promise.all([
+    supabase
+      .from("styles")
+      .select("name, category, source, license")
+      .order("category", { ascending: true }),
+    supabase
+      .from("music_styles")
+      .select("name, category, source, license")
+      .order("category", { ascending: true }),
+  ]);
+
+  const videoGroups = groupBySourceLicense(styles || []);
+  const musicGroups = groupBySourceLicense(musicStyles || []);
+
   return (
     <>
       <HeroBanner variant="slim" />
@@ -37,55 +53,48 @@ export default function CreditsPage() {
         </p>
       </div>
 
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium text-sage-800">
-          Background video — Pexels
-        </h2>
-        <p className="text-xs text-sage-500">
-          Used under the{" "}
-          <a
-            href="https://www.pexels.com/license/"
-            className="underline"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Pexels License
-          </a>{" "}
-          (free for commercial use, no attribution required).
-        </p>
-        <ul className="mt-2 flex flex-col gap-1 text-sm text-sage-600">
-          {VIDEO_CREDITS.map((c) => (
-            <li key={c.style}>
-              <span className="font-medium">{c.style}:</span> {c.title} ({c.source})
-            </li>
-          ))}
-        </ul>
+      <section className="flex flex-col gap-6">
+        <h2 className="text-sm font-medium text-sage-800">Background video</h2>
+        {videoGroups.map((group) => (
+          <div key={`${group.source}-${group.license}`} className="flex flex-col gap-2">
+            <p className="text-xs text-sage-500">
+              <span className="font-medium">{group.source}</span>
+              {group.license ? ` — ${group.license}` : ""}
+            </p>
+            <ul className="flex flex-col gap-1 text-sm text-sage-600">
+              {group.items.map((item, i) => (
+                <li key={`${item.name}-${i}`}>
+                  {item.category && item.category !== item.name ? (
+                    <span className="font-medium">{item.category}:</span>
+                  ) : null}{" "}
+                  {item.name}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
       </section>
 
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium text-sage-800">
-          Music — Kevin MacLeod (incompetech.com)
-        </h2>
-        <p className="text-xs text-sage-500">
-          Licensed under{" "}
-          <a
-            href="https://creativecommons.org/licenses/by/4.0/"
-            className="underline"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Creative Commons Attribution 4.0
-          </a>
-          .
-        </p>
-        <ul className="mt-2 flex flex-col gap-1 text-sm text-sage-600">
-          {MUSIC_CREDITS.map((c) => (
-            <li key={c.style}>
-              <span className="font-medium">{c.style}:</span> &quot;{c.title}&quot; by
-              Kevin MacLeod (incompetech.com), licensed under CC BY 4.0.
-            </li>
-          ))}
-        </ul>
+      <section className="flex flex-col gap-6">
+        <h2 className="text-sm font-medium text-sage-800">Music</h2>
+        {musicGroups.map((group) => (
+          <div key={`${group.source}-${group.license}`} className="flex flex-col gap-2">
+            <p className="text-xs text-sage-500">
+              <span className="font-medium">{group.source}</span>
+              {group.license ? ` — ${group.license}` : ""}
+            </p>
+            <ul className="flex flex-col gap-1 text-sm text-sage-600">
+              {group.items.map((item, i) => (
+                <li key={`${item.name}-${i}`}>
+                  &quot;{item.name}&quot;
+                  {item.category && item.category !== item.name
+                    ? ` (${item.category})`
+                    : ""}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
       </section>
       </main>
     </>

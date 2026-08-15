@@ -42,14 +42,20 @@ export interface Style {
   visual_asset: string;
   music_asset: string;
   caption_template: string | null;
+  category: string | null;
+  source: string | null;
+  license: string | null;
 }
 
 // Background music, chosen independently of the visual style (see
-// supabase/migrations/0010_music_styles.sql).
+// supabase/migrations/0010_music_styles.sql, 0011_asset_library.sql).
 export interface MusicStyle {
   id: string;
   name: string;
   music_asset: string | null;
+  category: string | null;
+  source: string | null;
+  license: string | null;
 }
 
 export interface RenderJob {
