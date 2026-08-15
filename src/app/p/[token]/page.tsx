@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import HeroBanner from "../../hero-banner";
 import PrayerVideoPlayer from "../../prayer-video-player";
+import type { AccentColor, TextStyle } from "@/lib/types";
 
 export default async function SharedPrayerPage({
   params,
@@ -13,7 +14,7 @@ export default async function SharedPrayerPage({
 
   const { data: shareLink } = await supabase
     .from("share_links")
-    .select("*, prayers(title, recipient_name, transcript)")
+    .select("*, prayers(title, recipient_name, transcript, accent_color, text_style)")
     .eq("token", token)
     .maybeSingle();
 
@@ -41,18 +42,19 @@ export default async function SharedPrayerPage({
     title: string | null;
     recipient_name: string | null;
     transcript: string | null;
+    accent_color: AccentColor | null;
+    text_style: TextStyle | null;
   };
+
+  const displayTitle =
+    prayer.title ||
+    (prayer.recipient_name ? `A Prayer for ${prayer.recipient_name}` : "A Prayer");
 
   return (
     <>
       <HeroBanner variant="slim" />
       <main className="mx-auto flex min-h-dvh max-w-xl flex-col items-center justify-center gap-6 px-6 text-center">
-      <h1 className="text-2xl font-semibold">
-        {prayer.title ||
-          (prayer.recipient_name
-            ? `A Prayer for ${prayer.recipient_name}`
-            : "A Prayer")}
-      </h1>
+      <h1 className="text-2xl font-semibold">{displayTitle}</h1>
 
       {renderJob?.output_url ? (
         // No autoPlay: mobile browsers block autoplay-with-sound outright,
@@ -62,13 +64,20 @@ export default async function SharedPrayerPage({
         // without it, tapping play forces the video into iOS's fullscreen
         // native player instead of playing in the page. The poster image
         // (render_jobs.thumbnail_url) is generated once per render and
-        // reused for every viewer of this link — it already has the title
-        // and full prayer text composited onto it (see worker/index.js
-        // generateThumbnail), so anyone opening the link sees the prayer
-        // text at rest, before ever pressing play, not just the sender.
+        // reused for every viewer of this link — it already has the full
+        // prayer text composited onto it (see worker/index.js
+        // generateThumbnail), so anyone opening the link sees that at rest,
+        // before ever pressing play. The title/recipient name is NOT baked
+        // into the video or thumbnail (see the note in worker/index.js) —
+        // PrayerVideoPlayer overlays it live instead, read fresh from the
+        // DB on every page load, so this stays correct even if the prayer
+        // is later reshared with a different recipient.
         <PrayerVideoPlayer
           src={renderJob.output_url}
           poster={renderJob.thumbnail_url}
+          title={displayTitle}
+          accentColor={prayer.accent_color}
+          textStyle={prayer.text_style}
         />
       ) : (
         <p className="text-sage-500">This prayer is still being prepared.</p>

@@ -95,6 +95,8 @@ export default async function PrayerDetailPage({
           prayerId={prayer.id}
           userId={user.id}
           title={displayTitle}
+          accentColor={prayer.accent_color}
+          textStyle={prayer.text_style}
           initialJob={renderJob}
         />
       </section>

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import type { RenderJob } from "@/lib/types";
+import type { AccentColor, RenderJob, TextStyle } from "@/lib/types";
 import ShareButton from "./share-button";
 import PrayerActions from "../../prayer-actions";
 import PrayerVideoPlayer from "../../prayer-video-player";
@@ -19,11 +19,15 @@ export default function RenderStatus({
   prayerId,
   userId,
   title,
+  accentColor,
+  textStyle,
   initialJob,
 }: {
   prayerId: string;
   userId: string;
   title: string;
+  accentColor?: AccentColor | null;
+  textStyle?: TextStyle | null;
   initialJob: RenderJob | null;
 }) {
   const supabase = createClient();
@@ -61,7 +65,13 @@ export default function RenderStatus({
   if (job.status === "complete" && job.output_url) {
     return (
       <div className="mt-3 flex flex-col gap-3">
-        <PrayerVideoPlayer src={job.output_url} poster={job.thumbnail_url} />
+        <PrayerVideoPlayer
+          src={job.output_url}
+          poster={job.thumbnail_url}
+          title={title}
+          accentColor={accentColor}
+          textStyle={textStyle}
+        />
         <div className="flex flex-wrap items-center gap-2">
           <PrayerActions
             prayerId={prayerId}
