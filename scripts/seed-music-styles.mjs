@@ -170,26 +170,35 @@ async function uploadToStorage(localPath, storagePath, contentType) {
   return publicUrlData.publicUrl;
 }
 
+// Optional: node scripts/seed-music-styles.mjs --limit=3 processes only
+// the first N not-yet-imported tracks, then exits. Safe to re-run
+// repeatedly (e.g. in short bursts) — already-imported tracks (matched by
+// name) are skipped entirely, not re-downloaded.
+const limitArg = process.argv.find((a) => a.startsWith("--limit="));
+const LIMIT = limitArg ? parseInt(limitArg.split("=")[1], 10) : Infinity;
+
 async function main() {
   const workDir = await mkdtemp(path.join(tmpdir(), "music-styles-"));
   console.log(`Working in ${workDir}`);
 
+  const { data: existingRows } = await supabase.from("music_styles").select("name");
+  const existingNames = new Set((existingRows || []).map((r) => r.name));
+
   const failed = [];
   let imported = 0;
-  let skipped = 0;
+  let processed = 0;
 
   for (const [name, track] of Object.entries(TRACKS)) {
+    if (existingNames.has(name)) continue;
+    if (processed >= LIMIT) {
+      console.log(`\n--limit=${LIMIT} reached, stopping (re-run to continue).`);
+      break;
+    }
     const { url, category } = track;
     const source = track.source || DEFAULT_SOURCE;
     const license = track.license || DEFAULT_LICENSE;
     console.log(`\n${name} (${category}):`);
     try {
-      const { data: existing } = await supabase
-        .from("music_styles")
-        .select("id")
-        .eq("name", name)
-        .maybeSingle();
-
       const musicLocal = path.join(workDir, `${slugify(name)}.mp3`);
 
       console.log("  downloading...");
@@ -201,32 +210,26 @@ async function main() {
       console.log("  uploading to Supabase Storage...");
       const musicUrl = await uploadToStorage(musicLocal, storagePath, "audio/mpeg");
 
-      console.log("  upserting music_styles row...");
-      if (existing) {
-        const { error } = await supabase
-          .from("music_styles")
-          .update({ music_asset: musicUrl, category, source, license })
-          .eq("id", existing.id);
-        if (error) throw new Error(`Failed to update music_styles row for ${name}: ${error.message}`);
-        skipped++;
-      } else {
-        const { error } = await supabase
-          .from("music_styles")
-          .insert({ name, music_asset: musicUrl, category, source, license });
-        if (error) throw new Error(`Failed to insert music_styles row for ${name}: ${error.message}`);
-        imported++;
-      }
+      console.log("  inserting music_styles row...");
+      const { error } = await supabase
+        .from("music_styles")
+        .insert({ name, music_asset: musicUrl, category, source, license });
+      if (error) throw new Error(`Failed to insert music_styles row for ${name}: ${error.message}`);
+      imported++;
+      processed++;
 
       console.log(`  done: ${name} -> ${musicUrl}`);
     } catch (err) {
       console.error(`  FAILED: ${name}: ${err.message}`);
       failed.push(name);
+      processed++;
     }
   }
 
   await rm(workDir, { recursive: true, force: true });
 
-  console.log(`\nImported ${imported} new, updated ${skipped} existing.`);
+  const stillTodo = Object.keys(TRACKS).length - existingNames.size - imported;
+  console.log(`\nImported ${imported} new this run. ${Math.max(stillTodo, 0)} left to do — re-run to continue.`);
   if (failed.length) {
     console.log(`Failed (swap the URL in TRACKS and re-run): ${failed.join(", ")}`);
     process.exitCode = 1;

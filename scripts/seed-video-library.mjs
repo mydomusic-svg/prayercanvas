@@ -98,6 +98,13 @@ async function uploadToStorage(localPath, storagePath, contentType) {
   return publicUrlData.publicUrl;
 }
 
+// Optional: node scripts/seed-video-library.mjs --limit=5 imports only N
+// new clips total (across all categories) then exits — useful for running
+// in short bursts. Safe to re-run repeatedly; already-imported Pexels ids
+// are skipped, so each run picks up roughly where the last left off.
+const limitArg = process.argv.find((a) => a.startsWith("--limit="));
+const GLOBAL_LIMIT = limitArg ? parseInt(limitArg.split("=")[1], 10) : Infinity;
+
 async function main() {
   const workDir = await mkdtemp(path.join(tmpdir(), "video-library-"));
   console.log(`Working in ${workDir}`);
@@ -116,6 +123,10 @@ async function main() {
   const failed = [];
 
   for (const [category, queries] of Object.entries(CATEGORIES)) {
+    if (totalImported >= GLOBAL_LIMIT) {
+      console.log(`\n--limit=${GLOBAL_LIMIT} reached, stopping (re-run to continue).`);
+      break;
+    }
     console.log(`\n=== ${category} ===`);
     const seen = new Set();
     const candidates = [];
@@ -137,6 +148,7 @@ async function main() {
     console.log(`  found ${candidates.length} new candidates, importing ${toImport.length}`);
 
     for (const { video, query } of toImport) {
+      if (totalImported >= GLOBAL_LIMIT) break;
       try {
         const file = pickBestFile(video);
         if (!file) throw new Error("no usable mp4 file");
