@@ -96,29 +96,44 @@ const DEFAULT_THEME = { bg: "0x2f4a3e", text: "white", accent: "0xf5c451" };
 // Title font per text style, plus the sizing/wrapping each font needs to
 // look right — Caveat and Montserrat read very differently from the
 // calligraphy script at the same pixel size, so each preset tunes its own.
+//
+// Sizes bumped ~15-20% and a dark outline (titleBorderW, applied via
+// drawtext's bordercolor/borderw below) added after a real render came back
+// with the title nearly invisible: the accent color is user-picked and can
+// be very light (gold 0xf5c451, sky 0x8ecae6, ivory pure white), and the
+// title previously had nothing but flat fontcolor behind it — against a
+// light/foggy/overcast background clip those combinations have almost no
+// contrast at all. A dark outline + drop shadow guarantees the title reads
+// against ANY background/accent-color combination, not just the ones we
+// happened to preview with. Calligraphy (GreatVibes) has no bold variant
+// available at all, so its outline is thicker to compensate for that —
+// modern and handwritten already use bold/extra-bold weight font files.
 const TEXT_STYLES = {
   calligraphy: {
     font: FONT_CALLIGRAPHY,
-    videoFontSize: 60,
-    videoWrapChars: 22,
-    thumbFontSize: 70,
-    thumbWrapChars: 20,
+    videoFontSize: 72,
+    videoWrapChars: 18,
+    thumbFontSize: 84,
+    thumbWrapChars: 17,
+    titleBorderW: 5,
     uppercase: false,
   },
   modern: {
     font: FONT_MODERN,
-    videoFontSize: 44,
-    videoWrapChars: 16,
-    thumbFontSize: 48,
-    thumbWrapChars: 15,
+    videoFontSize: 50,
+    videoWrapChars: 14,
+    thumbFontSize: 56,
+    thumbWrapChars: 13,
+    titleBorderW: 3,
     uppercase: true,
   },
   handwritten: {
     font: FONT_HANDWRITTEN,
-    videoFontSize: 66,
-    videoWrapChars: 20,
-    thumbFontSize: 76,
-    thumbWrapChars: 18,
+    videoFontSize: 78,
+    videoWrapChars: 17,
+    thumbFontSize: 88,
+    thumbWrapChars: 16,
+    titleBorderW: 4,
     uppercase: false,
   },
 };
@@ -617,6 +632,15 @@ async function generateThumbnail({
   // text stays readable; dark themes need a dark scrim under white text.
   const scrimColor = theme.text === "black" ? "white@0.6" : "black@0.42";
 
+  // Softly blur the background photo behind the text (like a magazine
+  // pull-quote card) rather than leaving it sharp — a real render came back
+  // with the resting thumbnail looking cluttered/hard to read against a
+  // busy, high-detail background clip. Blur calms that down into a soft,
+  // out-of-focus backdrop so the text is what actually reads first, the
+  // same effect as the reference "Powerful Morning Prayer" card the user
+  // pointed to.
+  const BG_BLUR = "gblur=sigma=14";
+
   // Switched from a plain -vf chain to -filter_complex with labeled pads:
   // the watermark overlay below needs a second input (the logo image), and
   // -vf only supports a single-input filter chain.
@@ -624,15 +648,28 @@ async function generateThumbnail({
   let currentLabel = "0:v";
   if (backgroundVideoPath) {
     filters.push(
-      `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[bg]`
+      `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,${BG_BLUR}[bg]`
     );
+    currentLabel = "bg";
+  } else {
+    // The lavfi solid-color fallback has nothing to blur, but still needs
+    // its own labeled pad to feed into the scrim step below.
+    filters.push(`[0:v]${BG_BLUR}[bg]`);
     currentLabel = "bg";
   }
   filters.push(
     `[${currentLabel}]drawbox=x=0:y=440:w=1080:h=1040:color=${scrimColor}:t=fill[s1]`
   );
+  // Keeps the user's picked accent color (personalization) for the title —
+  // dropping it in favor of a fixed color would quietly disable the accent
+  // color picker's whole effect on the thing users actually look at most.
+  // The dark outline + shadow is what actually guarantees legibility
+  // regardless of which color was picked or how bright the background
+  // photo happens to be, not a fixed fontcolor.
   filters.push(
-    `[s1]drawtext=textfile='${titleLinesPath}':fontfile='${textStyle.font}':fontsize=${textStyle.thumbFontSize}:fontcolor=${accentColor}:line_spacing=6:x=(w-text_w)/2:y=530[s2]`
+    `[s1]drawtext=textfile='${titleLinesPath}':fontfile='${textStyle.font}':fontsize=${textStyle.thumbFontSize}:fontcolor=${accentColor}:` +
+      `bordercolor=black@0.55:borderw=${textStyle.titleBorderW}:shadowcolor=black@0.35:shadowx=2:shadowy=2:` +
+      `line_spacing=6:x=(w-text_w)/2:y=530[s2]`
   );
   filters.push(
     `[s2]drawtext=textfile='${bodyLinesPath}':fontfile='${FONT_SERIF}':fontsize=40:fontcolor=${theme.text}:line_spacing=20:x=(w-text_w)/2:y=830[s3]`
@@ -767,9 +804,16 @@ function buildFilterComplex({
 
   // Title uses the user's chosen text-style font + accent color (Sprint
   // 3.8) so the video and its own thumbnail look like a matched set instead
-  // of the thumbnail being the only "designed" part.
+  // of the thumbnail being the only "designed" part. A dark outline +
+  // drop shadow (same treatment as the thumbnail's title) was added after a
+  // real render came back nearly unreadable: a light accent color (gold,
+  // sky, ivory) against a light/foggy background clip has almost no
+  // contrast on its own, and unlike the thumbnail there's no scrim behind
+  // the title here at all — the outline is what actually guarantees this
+  // reads regardless of accent color or background brightness.
   filters.push(
     `[${currentLabel}]drawtext=textfile='${titlePath}':fontfile='${textStyle.font}':fontsize=${textStyle.videoFontSize}:fontcolor=${accentColor}:` +
+      `bordercolor=black@0.55:borderw=${textStyle.titleBorderW}:shadowcolor=black@0.35:shadowx=2:shadowy=2:` +
       `x=(w-text_w)/2:y=140:line_spacing=10[${nextLabel}]`
   );
   currentLabel = nextLabel;
