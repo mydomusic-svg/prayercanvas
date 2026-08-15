@@ -43,12 +43,15 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 const BUCKET = "style-assets";
 
-const SOURCE = "Kevin MacLeod (incompetech.com)";
-const LICENSE = "Creative Commons Attribution 4.0";
+const DEFAULT_SOURCE = "Kevin MacLeod (incompetech.com)";
+const DEFAULT_LICENSE = "Creative Commons Attribution 4.0";
 
-// track title (must exactly match the real incompetech filename) ->
-// { url, category }. category is the mood tag shown as a filter chip in
-// the picker.
+// track title (must exactly match the real incompetech filename, unless a
+// full source/license override is given) -> { url, category, source?,
+// license? }. category is the mood tag shown as a filter chip in the
+// picker; source/license default to the incompetech constants above but
+// can be overridden per-track for tracks pulled from elsewhere (e.g.
+// SoundBible.com sound effects).
 const TRACKS = {
   Piano: {
     url: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Meditation%20Impromptu%2001.mp3",
@@ -90,6 +93,54 @@ const TRACKS = {
     url: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Angevin%20B.mp3",
     category: "Acoustic",
   },
+  // Meditation: rain/thunder-adjacent, deeply calming pieces for a
+  // "storm sounds while you pray" mood.
+  "Thunder Dreams": {
+    url: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Thunder%20Dreams.mp3",
+    category: "Meditation",
+  },
+  "Rains Will Fall": {
+    url: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Rains%20Will%20Fall.mp3",
+    category: "Meditation",
+  },
+  "Meditation Impromptu 02": {
+    url: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Meditation%20Impromptu%2002.mp3",
+    category: "Meditation",
+  },
+  "Meditation Impromptu 03": {
+    url: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Meditation%20Impromptu%2003.mp3",
+    category: "Meditation",
+  },
+  "Floating Cities": {
+    url: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Floating%20Cities.mp3",
+    category: "Meditation",
+  },
+  // Real rain/thunder ambience (not melodic music) from SoundBible.com,
+  // for a literal "storm sounds while you pray" option.
+  "Perfect Thunder Storm": {
+    url: "https://soundbible.com/grab.php?id=916&type=mp3",
+    category: "Meditation",
+    source: "Mike Koenig (soundbible.com)",
+    license: "Creative Commons Attribution 3.0",
+  },
+  "Rain And Thunder Strikes": {
+    url: "https://soundbible.com/grab.php?id=901&type=mp3",
+    category: "Meditation",
+    source: "Mike Koenig (soundbible.com)",
+    license: "Creative Commons Attribution 3.0",
+  },
+  "Medium Rainstorm": {
+    url: "https://soundbible.com/grab.php?id=1829&type=mp3",
+    category: "Meditation",
+    source: "Mike Koenig (soundbible.com)",
+    license: "Creative Commons Attribution 3.0",
+  },
+  "Rainforest Ambience": {
+    url: "https://soundbible.com/grab.php?id=1818&type=mp3",
+    category: "Meditation",
+    source: "GlorySunz (soundbible.com)",
+    license: "Public Domain",
+  },
 };
 
 function slugify(s) {
@@ -127,7 +178,10 @@ async function main() {
   let imported = 0;
   let skipped = 0;
 
-  for (const [name, { url, category }] of Object.entries(TRACKS)) {
+  for (const [name, track] of Object.entries(TRACKS)) {
+    const { url, category } = track;
+    const source = track.source || DEFAULT_SOURCE;
+    const license = track.license || DEFAULT_LICENSE;
     console.log(`\n${name} (${category}):`);
     try {
       const { data: existing } = await supabase
@@ -151,14 +205,14 @@ async function main() {
       if (existing) {
         const { error } = await supabase
           .from("music_styles")
-          .update({ music_asset: musicUrl, category, source: SOURCE, license: LICENSE })
+          .update({ music_asset: musicUrl, category, source, license })
           .eq("id", existing.id);
         if (error) throw new Error(`Failed to update music_styles row for ${name}: ${error.message}`);
         skipped++;
       } else {
         const { error } = await supabase
           .from("music_styles")
-          .insert({ name, music_asset: musicUrl, category, source: SOURCE, license: LICENSE });
+          .insert({ name, music_asset: musicUrl, category, source, license });
         if (error) throw new Error(`Failed to insert music_styles row for ${name}: ${error.message}`);
         imported++;
       }
