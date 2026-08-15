@@ -45,7 +45,7 @@ const BUCKET = "style-assets";
 // 0010_music_styles.sql).
 const TRACKS = {
   Piano: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Meditation%20Impromptu%2001.mp3",
-  Ukulele: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Ukulele.mp3",
+  Ukulele: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Local%20Forecast.mp3",
   Ambient: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Wallpaper.mp3",
   Classical: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Canon%20in%20D%20Pachelbel.mp3",
 };

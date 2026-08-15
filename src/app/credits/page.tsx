@@ -19,7 +19,7 @@ const MUSIC_CREDITS = [
   { style: "Scripture", title: "Amazing Grace 2011" },
   { style: "Peaceful", title: "Winter Reflections" },
   { style: "Piano", title: "Meditation Impromptu 01" },
-  { style: "Ukulele", title: "Ukulele" },
+  { style: "Ukulele", title: "Local Forecast" },
   { style: "Ambient", title: "Wallpaper" },
   { style: "Classical", title: "Canon in D Pachelbel" },
 ];
