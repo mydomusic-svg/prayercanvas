@@ -85,8 +85,8 @@ const TRACKS = {
     url: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Amazing%20Plan.mp3",
     category: "Uplifting",
   },
-  "Music To Delight": {
-    url: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Music%20To%20Delight.mp3",
+  "Music to Delight": {
+    url: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Music%20to%20Delight.mp3",
     category: "Celebration",
   },
   "Angevin B": {

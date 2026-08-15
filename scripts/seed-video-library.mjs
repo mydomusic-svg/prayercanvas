@@ -71,19 +71,35 @@ async function searchPexels(query) {
   return data.videos || [];
 }
 
-function pickBestFile(video) {
-  // Prefer HD portrait mp4 files in a reasonable size range.
+// Supabase Storage rejects uploads over ~50MB on the free tier — cap well
+// under that so a single oversized clip doesn't burn bandwidth re-failing
+// on every re-run.
+const MAX_UPLOAD_BYTES = 45 * 1024 * 1024;
+
+function pickFileCandidates(video) {
+  // Prefer HD portrait mp4 files, largest-but-still-safe first, with
+  // smaller resolutions as fallback if the top pick turns out oversized.
   const files = (video.video_files || []).filter((f) => f.file_type === "video/mp4");
   const portrait = files.filter((f) => f.height && f.width && f.height > f.width);
-  const pool = portrait.length ? portrait : files;
+  const pool = (portrait.length ? portrait : files).filter((f) => (f.height || 0) <= 1920);
   pool.sort((a, b) => (b.height || 0) - (a.height || 0));
-  return pool.find((f) => (f.height || 0) <= 1920) || pool[0];
+  return pool.length ? pool : files;
 }
 
-async function downloadTo(url, destPath) {
+async function downloadTo(url, destPath, maxBytes) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to download ${url}: ${res.status}`);
+  const contentLength = res.headers.get("content-length");
+  if (maxBytes && contentLength && Number(contentLength) > maxBytes) {
+    // Drain the response so the connection can be reused/closed cleanly,
+    // then bail before wasting time buffering a file we'll reject anyway.
+    await res.arrayBuffer().catch(() => {});
+    throw new Error(`TOO_LARGE:${contentLength}`);
+  }
   const buffer = Buffer.from(await res.arrayBuffer());
+  if (maxBytes && buffer.byteLength > maxBytes) {
+    throw new Error(`TOO_LARGE:${buffer.byteLength}`);
+  }
   await writeFile(destPath, buffer);
   return buffer.byteLength;
 }
@@ -150,12 +166,25 @@ async function main() {
     for (const { video, query } of toImport) {
       if (totalImported >= GLOBAL_LIMIT) break;
       try {
-        const file = pickBestFile(video);
-        if (!file) throw new Error("no usable mp4 file");
+        const candidates = pickFileCandidates(video);
+        if (!candidates.length) throw new Error("no usable mp4 file");
 
         const localPath = path.join(workDir, `pexels-${video.id}.mp4`);
-        console.log(`  downloading pexels-${video.id} (${query})...`);
-        const bytes = await downloadTo(file.link, localPath);
+        let bytes = null;
+        let lastErr = null;
+        for (const file of candidates) {
+          console.log(`  downloading pexels-${video.id} (${query}, ${file.height || "?"}p)...`);
+          try {
+            bytes = await downloadTo(file.link, localPath, MAX_UPLOAD_BYTES);
+            lastErr = null;
+            break;
+          } catch (err) {
+            lastErr = err;
+            if (!String(err.message).startsWith("TOO_LARGE:")) throw err;
+            console.log(`    too large, trying a lower resolution...`);
+          }
+        }
+        if (lastErr) throw new Error("all resolutions too large for Storage's upload limit");
         console.log(`    size: ${(bytes / 1024 / 1024).toFixed(1)} MB`);
 
         const storagePath = `videos/pexels-${video.id}.mp4`;
