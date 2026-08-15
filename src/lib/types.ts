@@ -29,6 +29,7 @@ export interface Prayer {
   captions: CaptionSegment[] | null;
   word_timings: WordTiming[] | null;
   style_id: string | null;
+  music_style_id: string | null;
   text_style: TextStyle;
   accent_color: AccentColor | null;
   privacy: Privacy;
@@ -41,6 +42,14 @@ export interface Style {
   visual_asset: string;
   music_asset: string;
   caption_template: string | null;
+}
+
+// Background music, chosen independently of the visual style (see
+// supabase/migrations/0010_music_styles.sql).
+export interface MusicStyle {
+  id: string;
+  name: string;
+  music_asset: string | null;
 }
 
 export interface RenderJob {

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import HeroBanner from "../hero-banner";
-import type { AccentColor, Style, TextStyle } from "@/lib/types";
+import type { AccentColor, MusicStyle, Style, TextStyle } from "@/lib/types";
 
 type RecordingState = "idle" | "recording" | "recorded";
 
@@ -94,6 +94,10 @@ export default function CreatePrayerPage() {
   const [occasion, setOccasion] = useState("");
   const [styles, setStyles] = useState<Style[]>([]);
   const [selectedStyleId, setSelectedStyleId] = useState<string | null>(null);
+  const [musicStyles, setMusicStyles] = useState<MusicStyle[]>([]);
+  const [selectedMusicStyleId, setSelectedMusicStyleId] = useState<string | null>(
+    null
+  );
   const [textStyle, setTextStyle] = useState<TextStyle>("calligraphy");
   const [accentColor, setAccentColor] = useState<AccentColor>("gold");
 
@@ -117,6 +121,18 @@ export default function CreatePrayerPage() {
         if (data) {
           setStyles(data as Style[]);
           if (data.length > 0) setSelectedStyleId(data[0].id);
+        }
+      });
+    // Music is chosen independently of the visual style — see
+    // supabase/migrations/0010_music_styles.sql.
+    supabase
+      .from("music_styles")
+      .select("id, name, music_asset")
+      .order("created_at", { ascending: true })
+      .then(({ data }) => {
+        if (data) {
+          setMusicStyles(data as MusicStyle[]);
+          if (data.length > 0) setSelectedMusicStyleId(data[0].id);
         }
       });
   }, [supabase]);
@@ -195,6 +211,7 @@ export default function CreatePrayerPage() {
           recipient_name: recipientName || null,
           occasion: occasion || null,
           style_id: selectedStyleId,
+          music_style_id: selectedMusicStyleId,
           text_style: textStyle,
           accent_color: accentColor,
           privacy: "private",
@@ -361,6 +378,28 @@ export default function CreatePrayerPage() {
                 }`}
               >
                 {style.name}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {musicStyles.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <p className="text-sm font-medium">Choose a music style</p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {musicStyles.map((musicStyle) => (
+              <button
+                key={musicStyle.id}
+                type="button"
+                onClick={() => setSelectedMusicStyleId(musicStyle.id)}
+                className={`rounded-lg border px-4 py-3 text-sm transition ${
+                  selectedMusicStyleId === musicStyle.id
+                    ? "border-sage-600 bg-sage-600 text-white"
+                    : "border-sage-300 hover:bg-sage-50"
+                }`}
+              >
+                {musicStyle.name}
               </button>
             ))}
           </div>

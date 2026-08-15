@@ -198,7 +198,7 @@ async function renderPrayer(job, workDir) {
   const { data: prayer, error: prayerError } = await supabase
     .from("prayers")
     .select(
-      "id, user_id, title, recipient_name, transcript, captions, word_timings, style_id, text_style, accent_color"
+      "id, user_id, title, recipient_name, transcript, captions, word_timings, style_id, music_style_id, text_style, accent_color"
     )
     .eq("id", job.prayer_id)
     .single();
@@ -220,7 +220,22 @@ async function renderPrayer(job, workDir) {
     // columns with placeholder filenames (e.g. "nature-loop.mp4") until
     // scripts/seed-style-assets.mjs replaces them with real Storage URLs.
     if (style?.visual_asset?.startsWith("http")) visualAssetUrl = style.visual_asset;
+    // The style's own music_asset is now only a fallback — see below.
     if (style?.music_asset?.startsWith("http")) musicAssetUrl = style.music_asset;
+  }
+
+  // Music is now chosen independently of the visual style (0010_music_
+  // styles.sql) — prayers created before that migration have no
+  // music_style_id, so they keep using their style's bundled track above.
+  if (prayer.music_style_id) {
+    const { data: musicStyle } = await supabase
+      .from("music_styles")
+      .select("music_asset")
+      .eq("id", prayer.music_style_id)
+      .maybeSingle();
+    if (musicStyle?.music_asset?.startsWith("http")) {
+      musicAssetUrl = musicStyle.music_asset;
+    }
   }
   const theme =
     STYLE_THEMES[(styleName ?? "").toLowerCase()] ?? DEFAULT_THEME;
