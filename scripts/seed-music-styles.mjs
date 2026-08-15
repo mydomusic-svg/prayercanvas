@@ -57,10 +57,6 @@ const TRACKS = {
     url: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Meditation%20Impromptu%2001.mp3",
     category: "Piano",
   },
-  Ukulele: {
-    url: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Local%20Forecast.mp3",
-    category: "Acoustic",
-  },
   Ambient: {
     url: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Wallpaper.mp3",
     category: "Ambient",
@@ -88,10 +84,6 @@ const TRACKS = {
   "Music to Delight": {
     url: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Music%20to%20Delight.mp3",
     category: "Celebration",
-  },
-  "Angevin B": {
-    url: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Angevin%20B.mp3",
-    category: "Acoustic",
   },
   // Meditation: rain/thunder-adjacent, deeply calming pieces for a
   // "storm sounds while you pray" mood.
