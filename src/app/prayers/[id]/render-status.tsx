@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import type { AccentColor, RenderJob, TextStyle } from "@/lib/types";
+import type { RenderJob } from "@/lib/types";
 import ShareButton from "./share-button";
+import MediaEditor from "./media-editor";
 import PrayerActions from "../../prayer-actions";
 import PrayerVideoPlayer from "../../prayer-video-player";
 
@@ -19,20 +20,26 @@ export default function RenderStatus({
   prayerId,
   userId,
   title,
-  accentColor,
-  textStyle,
+  styleId,
+  musicStyleId,
+  photoAssetUrl,
   initialJob,
 }: {
   prayerId: string;
   userId: string;
   title: string;
-  accentColor?: AccentColor | null;
-  textStyle?: TextStyle | null;
+  styleId: string | null;
+  musicStyleId: string | null;
+  photoAssetUrl: string | null;
   initialJob: RenderJob | null;
 }) {
   const supabase = createClient();
   const router = useRouter();
   const [job, setJob] = useState<RenderJob | null>(initialJob);
+  // Mirrors the prayer's style_id/music_style_id/photo_asset_url locally so
+  // MediaEditor always knows the real "current" values after a swap,
+  // without needing a full page reload — see its onRequeued callback below.
+  const [media, setMedia] = useState({ styleId, musicStyleId, photoAssetUrl });
   const pollCountRef = useRef(0);
 
   const isSettled = job?.status === "complete" || job?.status === "failed";
@@ -69,8 +76,6 @@ export default function RenderStatus({
           src={job.output_url}
           poster={job.thumbnail_url}
           title={title}
-          accentColor={accentColor}
-          textStyle={textStyle}
         />
         <div className="flex flex-wrap items-center gap-2">
           <PrayerActions
@@ -82,6 +87,17 @@ export default function RenderStatus({
           />
           <ShareButton prayerId={prayerId} />
         </div>
+        <MediaEditor
+          prayerId={prayerId}
+          userId={userId}
+          currentStyleId={media.styleId}
+          currentMusicStyleId={media.musicStyleId}
+          currentPhotoAssetUrl={media.photoAssetUrl}
+          onRequeued={(newJob, newMedia) => {
+            setJob(newJob);
+            setMedia(newMedia);
+          }}
+        />
       </div>
     );
   }

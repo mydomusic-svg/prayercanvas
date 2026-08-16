@@ -1,6 +1,4 @@
 import Image from "next/image";
-import type { AccentColor, TextStyle } from "@/lib/types";
-import { ACCENT_COLOR_HEX, TEXT_STYLE_FONT_VAR } from "@/lib/text-styles";
 
 // Shared branded video player "skin" — used on both the owner's private
 // prayer detail page and the public share page, so a rendered prayer looks
@@ -12,30 +10,24 @@ import { ACCENT_COLOR_HEX, TEXT_STYLE_FONT_VAR } from "@/lib/text-styles";
 // video once it's downloaded/reposted elsewhere, but this covers the
 // in-app viewing experience itself).
 //
-// The title is rendered here as a live HTML overlay, NOT burned into the
-// video/thumbnail pixels (the worker used to do that — see the note above
-// renderPrayer's call site in worker/index.js). A recipient's name baked
-// permanently into the video meant a prayer recorded for one person and
-// later reused for someone else would always show the first person's name,
-// with no fix short of a full re-render. This overlay reads `title` fresh
-// on every page load, so editing it (already possible via EditableTitle on
-// the owner's page) or resharing with someone new takes effect instantly.
+// The title used to be rendered here as a live HTML overlay on top of the
+// video (kept in sync with edits without re-rendering). That approach was
+// reverted — see the note above renderPrayer's title-burning code in
+// worker/index.js — because recipients who received the video as a native
+// file never saw the HTML overlay at all, only the actual video pixels. Now
+// that the title is burned back into the video itself, keeping this HTML
+// overlay too would just draw a second, slightly misaligned copy of the
+// same text on top of the first every time someone watches in-app — so it's
+// gone; `title` is only used for the video's accessible label now.
 export default function PrayerVideoPlayer({
   src,
   poster,
   title,
-  accentColor,
-  textStyle,
 }: {
   src: string;
   poster?: string | null;
   title?: string | null;
-  accentColor?: AccentColor | null;
-  textStyle?: TextStyle | null;
 }) {
-  const color = ACCENT_COLOR_HEX[accentColor ?? "gold"];
-  const { fontVar, uppercase } = TEXT_STYLE_FONT_VAR[textStyle ?? "calligraphy"];
-
   return (
     <div className="w-full">
       {/* Soft gold/sage gradient "frame" around the vertical video, like a
@@ -47,24 +39,9 @@ export default function PrayerVideoPlayer({
             poster={poster ?? undefined}
             controls
             playsInline
+            aria-label={title ?? "Prayer video"}
             className="block w-full"
           />
-          {title ? (
-            <div
-              aria-hidden
-              className="pointer-events-none absolute inset-x-0 top-0 px-6 pt-6 text-center text-2xl font-bold leading-tight sm:text-3xl"
-              style={{
-                color,
-                fontFamily: fontVar,
-                textTransform: uppercase ? "uppercase" : "none",
-                textShadow:
-                  "0 1px 3px rgba(0,0,0,0.75), 0 0 10px rgba(0,0,0,0.55)",
-                WebkitTextStroke: "0.5px rgba(0,0,0,0.55)",
-              }}
-            >
-              {title}
-            </div>
-          ) : null}
         </div>
       </div>
       <div className="mt-3 flex items-center justify-center gap-1.5">

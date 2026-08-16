@@ -2,7 +2,6 @@ import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import HeroBanner from "../../hero-banner";
 import PrayerVideoPlayer from "../../prayer-video-player";
-import type { AccentColor, TextStyle } from "@/lib/types";
 
 export default async function SharedPrayerPage({
   params,
@@ -15,7 +14,7 @@ export default async function SharedPrayerPage({
   const { data: shareLink } = await supabase
     .from("share_links")
     .select(
-      "*, prayers(title, recipient_name, include_recipient_in_title, transcript, accent_color, text_style)"
+      "*, prayers(title, recipient_name, include_recipient_in_title, transcript)"
     )
     .eq("token", token)
     .maybeSingle();
@@ -45,8 +44,6 @@ export default async function SharedPrayerPage({
     recipient_name: string | null;
     include_recipient_in_title: boolean;
     transcript: string | null;
-    accent_color: AccentColor | null;
-    text_style: TextStyle | null;
   };
 
   const displayTitle =
@@ -72,17 +69,14 @@ export default async function SharedPrayerPage({
         // reused for every viewer of this link — it already has the full
         // prayer text composited onto it (see worker/index.js
         // generateThumbnail), so anyone opening the link sees that at rest,
-        // before ever pressing play. The title/recipient name is NOT baked
-        // into the video or thumbnail (see the note in worker/index.js) —
-        // PrayerVideoPlayer overlays it live instead, read fresh from the
-        // DB on every page load, so this stays correct even if the prayer
-        // is later reshared with a different recipient.
+        // before ever pressing play. The title/recipient name IS baked into
+        // the video/thumbnail pixels themselves (see worker/index.js) —
+        // PrayerVideoPlayer no longer overlays it separately, since that used
+        // to draw a second, slightly misaligned copy on top of the first.
         <PrayerVideoPlayer
           src={renderJob.output_url}
           poster={renderJob.thumbnail_url}
           title={displayTitle}
-          accentColor={prayer.accent_color}
-          textStyle={prayer.text_style}
         />
       ) : (
         <p className="text-sage-500">This prayer is still being prepared.</p>

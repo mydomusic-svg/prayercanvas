@@ -1,0 +1,366 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+import type { MusicStyle, RenderJob, Style } from "@/lib/types";
+
+// Lets the owner swap the background or music on an already-rendered prayer
+// without re-recording or re-transcribing anything. A full "regenerate"
+// (record → upload → transcribe → AI title/theme → render) is by far the
+// most expensive part of creating a prayer; picking a different background
+// clip or music bed doesn't need any of that, since the transcript,
+// captions, word timings, and title are all still sitting in the `prayers`
+// row from the first render. This just updates style_id/music_style_id (or
+// uploads a new photo) and queues a fresh render_jobs row — the worker
+// re-runs its ffmpeg pass against the existing audio/transcript, which
+// takes anywhere from a few seconds to under a minute depending on clip
+// length, versus the full pipeline which also has to wait on Whisper +
+// Claude. It's not a zero-cost swap (the video file itself has to be
+// re-encoded either way, since the background/music are literally
+// composited into the output — see worker/index.js), just a much cheaper
+// one than starting over.
+export default function MediaEditor({
+  prayerId,
+  userId,
+  currentStyleId,
+  currentMusicStyleId,
+  currentPhotoAssetUrl,
+  onRequeued,
+}: {
+  prayerId: string;
+  userId: string;
+  currentStyleId: string | null;
+  currentMusicStyleId: string | null;
+  currentPhotoAssetUrl: string | null;
+  onRequeued: (
+    job: RenderJob,
+    media: { styleId: string | null; musicStyleId: string | null; photoAssetUrl: string | null }
+  ) => void;
+}) {
+  const supabase = createClient();
+
+  const [expanded, setExpanded] = useState(false);
+  const [styles, setStyles] = useState<Style[]>([]);
+  const [musicStyles, setMusicStyles] = useState<MusicStyle[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  // "background mode" mirrors create/page.tsx: either a library style
+  // (picked by category, specific clip randomized at submit) or a
+  // user-uploaded photo. Seeded from whatever the prayer currently has so
+  // opening this panel doesn't look like it reset your choice.
+  const [backgroundMode, setBackgroundMode] = useState<"library" | "photo">(
+    currentPhotoAssetUrl ? "photo" : "library"
+  );
+  const [selectedStyleCategory, setSelectedStyleCategory] = useState<string | null>(
+    null
+  );
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+
+  const [selectedMusicStyleId, setSelectedMusicStyleId] = useState<string | null>(
+    currentMusicStyleId
+  );
+  const [musicCategory, setMusicCategory] = useState<string | null>(null);
+
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!expanded || loaded) return;
+    Promise.all([
+      supabase
+        .from("styles")
+        .select("id, name, visual_asset, music_asset, caption_template, category, source, license")
+        .order("category", { ascending: true }),
+      supabase
+        .from("music_styles")
+        .select("id, name, music_asset, category, source, license")
+        .order("category", { ascending: true })
+        .order("created_at", { ascending: true }),
+    ]).then(([stylesRes, musicRes]) => {
+      const fetchedStyles = (stylesRes.data as Style[] | null) ?? [];
+      const fetchedMusic = (musicRes.data as MusicStyle[] | null) ?? [];
+      setStyles(fetchedStyles);
+      setMusicStyles(fetchedMusic);
+
+      const currentStyle = fetchedStyles.find((s) => s.id === currentStyleId);
+      setSelectedStyleCategory(
+        currentStyle?.category ?? fetchedStyles[0]?.category ?? null
+      );
+
+      const currentMusic = fetchedMusic.find((m) => m.id === currentMusicStyleId);
+      setMusicCategory(currentMusic?.category ?? fetchedMusic[0]?.category ?? null);
+
+      setLoaded(true);
+    });
+  }, [expanded, loaded, supabase, currentStyleId, currentMusicStyleId]);
+
+  function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoFile(file);
+    setPhotoPreviewUrl(URL.createObjectURL(file));
+    setBackgroundMode("photo");
+  }
+
+  function pickRandomStyleId(category: string | null): string | null {
+    if (styles.length === 0) return null;
+    const pool = category
+      ? styles.filter((s) => (s.category || "Other") === category)
+      : styles;
+    const options = pool.length > 0 ? pool : styles;
+    return options[Math.floor(Math.random() * options.length)].id;
+  }
+
+  const musicChanged = selectedMusicStyleId !== currentMusicStyleId;
+  const backgroundChanged =
+    backgroundMode === "photo"
+      ? Boolean(photoFile) // only a genuinely new upload counts as a change
+      : !currentPhotoAssetUrl
+        ? selectedStyleCategory !==
+          (styles.find((s) => s.id === currentStyleId)?.category ?? null)
+        : true; // switching away from a photo to a library style is always a change
+  const hasChanges = musicChanged || backgroundChanged;
+
+  async function handleUpdate() {
+    if (!hasChanges) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const updates: Record<string, string | null> = {};
+      // Resolved end-state, reported back to the parent below regardless of
+      // which individual fields actually changed, so it can keep its
+      // "current" values in sync without needing a full page reload.
+      let finalStyleId = currentStyleId;
+      let finalMusicStyleId = currentMusicStyleId;
+      let finalPhotoAssetUrl = currentPhotoAssetUrl;
+
+      if (musicChanged) {
+        updates.music_style_id = selectedMusicStyleId;
+        finalMusicStyleId = selectedMusicStyleId;
+      }
+
+      if (backgroundChanged) {
+        if (backgroundMode === "photo") {
+          if (photoFile) {
+            const ext = photoFile.name.split(".").pop()?.toLowerCase() || "jpg";
+            const photoPath = `${userId}/${prayerId}/photo.${ext}`;
+            const { error: uploadError } = await supabase.storage
+              .from("prayer-photos")
+              .upload(photoPath, photoFile, {
+                contentType: photoFile.type || "image/jpeg",
+                upsert: true,
+              });
+            if (uploadError) throw uploadError;
+
+            const { data: publicUrl } = supabase.storage
+              .from("prayer-photos")
+              .getPublicUrl(photoPath);
+            updates.photo_asset_url = publicUrl.publicUrl;
+            finalPhotoAssetUrl = publicUrl.publicUrl;
+          }
+          updates.style_id = null;
+          finalStyleId = null;
+        } else {
+          const newStyleId = pickRandomStyleId(selectedStyleCategory);
+          updates.style_id = newStyleId;
+          updates.photo_asset_url = null;
+          finalStyleId = newStyleId;
+          finalPhotoAssetUrl = null;
+        }
+      }
+
+      const { error: updateError } = await supabase
+        .from("prayers")
+        .update(updates)
+        .eq("id", prayerId);
+      if (updateError) throw updateError;
+
+      // Only style/music/photo changed — transcript, captions, word timings,
+      // and title are untouched, so the worker's re-render doesn't need
+      // transcription or AI analysis again, just a fresh ffmpeg pass.
+      const { data: newJob, error: jobError } = await supabase
+        .from("render_jobs")
+        .insert({ prayer_id: prayerId, status: "pending" })
+        .select()
+        .single();
+      if (jobError || !newJob) throw jobError;
+
+      onRequeued(newJob as RenderJob, {
+        styleId: finalStyleId,
+        musicStyleId: finalMusicStyleId,
+        photoAssetUrl: finalPhotoAssetUrl,
+      });
+      setExpanded(false);
+      setPhotoFile(null);
+      setPhotoPreviewUrl(null);
+    } catch {
+      setError("Couldn't update the video. Try again in a moment.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        className="self-start rounded-full border border-sage-300 px-4 py-1.5 text-sm text-sage-700 transition hover:bg-sage-50"
+      >
+        Change music or background
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4 rounded-xl border border-sage-200 p-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium">Change music or background</p>
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="text-xs text-sage-500 underline"
+        >
+          Close
+        </button>
+      </div>
+
+      {!loaded ? (
+        <p className="text-sm text-sage-500">Loading options…</p>
+      ) : (
+        <>
+          <p className="text-xs text-sage-500">
+            This re-renders the video with your existing recording and
+            captions — no need to record again, just a fresh render with the
+            new background/music (usually well under a minute).
+          </p>
+
+          {styles.length > 0 && (() => {
+            const categories = Array.from(
+              new Set(styles.map((s) => s.category || "Other"))
+            );
+            return (
+              <div className="flex flex-col gap-2">
+                <p className="text-xs font-medium text-sage-600">Background</p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  <label
+                    className={`flex cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden rounded-lg border px-2 py-3 text-center text-xs transition ${
+                      backgroundMode === "photo"
+                        ? "border-sage-600 bg-sage-600 text-white"
+                        : "border-dashed border-sage-400 text-sage-600 hover:bg-sage-50"
+                    }`}
+                  >
+                    {photoPreviewUrl ? (
+                      <>
+                        {/* eslint-disable-next-line @next/next/no-img-element -- local object URL preview */}
+                        <img
+                          src={photoPreviewUrl}
+                          alt=""
+                          className="h-12 w-12 rounded object-cover"
+                        />
+                        <span>New photo (tap to change)</span>
+                      </>
+                    ) : backgroundMode === "photo" && currentPhotoAssetUrl ? (
+                      <span>📷 Current photo (tap to replace)</span>
+                    ) : (
+                      <span>📷 Upload a photo</span>
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handlePhotoUpload}
+                      className="hidden"
+                    />
+                  </label>
+                  {categories.map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => {
+                        setBackgroundMode("library");
+                        setSelectedStyleCategory(cat);
+                      }}
+                      className={`rounded-lg border px-3 py-3 text-xs transition ${
+                        backgroundMode === "library" && selectedStyleCategory === cat
+                          ? "border-sage-600 bg-sage-600 text-white"
+                          : "border-sage-300 hover:bg-sage-50"
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+                {backgroundMode === "library" && (
+                  <p className="text-xs text-sage-400">
+                    Picks a random new clip from that category — the exact
+                    clip isn&apos;t chosen until you hit update.
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+
+          {musicStyles.length > 0 && (() => {
+            const categories = Array.from(
+              new Set(musicStyles.map((m) => m.category || "Other"))
+            );
+            const visible = musicCategory
+              ? musicStyles.filter((m) => (m.category || "Other") === musicCategory)
+              : musicStyles;
+            return (
+              <div className="flex flex-col gap-2">
+                <p className="text-xs font-medium text-sage-600">Music</p>
+                {categories.length > 1 && (
+                  <div className="flex flex-wrap gap-2">
+                    {categories.map((cat) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setMusicCategory(cat)}
+                        className={`rounded-full border px-3 py-1 text-xs transition ${
+                          musicCategory === cat
+                            ? "border-sage-600 bg-sage-600 text-white"
+                            : "border-sage-300 text-sage-600 hover:bg-sage-50"
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {visible.map((musicStyle) => (
+                    <button
+                      key={musicStyle.id}
+                      type="button"
+                      onClick={() => setSelectedMusicStyleId(musicStyle.id)}
+                      className={`rounded-lg border px-3 py-2 text-xs transition ${
+                        selectedMusicStyleId === musicStyle.id
+                          ? "border-sage-600 bg-sage-600 text-white"
+                          : "border-sage-300 hover:bg-sage-50"
+                      }`}
+                    >
+                      {musicStyle.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
+          {error && <p className="text-xs text-red-600">{error}</p>}
+
+          <button
+            type="button"
+            onClick={handleUpdate}
+            disabled={!hasChanges || submitting}
+            className="self-start rounded-full bg-sage-600 px-5 py-2 text-sm text-white transition hover:bg-sage-700 disabled:opacity-50"
+          >
+            {submitting ? "Updating…" : "Update video"}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
