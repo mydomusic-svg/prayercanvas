@@ -48,18 +48,64 @@ const BUCKET = "style-assets";
 // results). Tune freely — this is meant to be edited and re-run over time
 // as the library grows.
 const CATEGORIES = {
-  Nature: ["forest stream", "ocean waves", "mountain sunrise", "rain on leaves"],
-  Cinematic: ["storm clouds", "golden hour clouds", "aerial mountains", "light rays forest"],
-  Minimal: ["bokeh lights", "soft gradient background", "blurred lights night"],
-  Celebration: ["confetti celebration", "sunshine through trees", "balloons sky"],
-  Scripture: ["candle flame", "open bible", "praying hands", "church interior"],
-  Peaceful: ["sunset clouds", "calm lake", "starry night sky", "gentle waves beach"],
-  Family: ["family embrace", "holding hands", "family silhouette sunset"],
-  Hope: ["sunrise horizon", "light breaking through clouds", "dove flying"],
+  Nature: [
+    "forest stream",
+    "ocean waves",
+    "mountain sunrise",
+    "rain on leaves",
+    "waterfall",
+    "meadow wind",
+  ],
+  Cinematic: [
+    "storm clouds",
+    "golden hour clouds",
+    "aerial mountains",
+    "light rays forest",
+    "fog mountains",
+    "city lights night",
+  ],
+  Minimal: [
+    "bokeh lights",
+    "soft gradient background",
+    "blurred lights night",
+    "abstract particles",
+  ],
+  Celebration: [
+    "confetti celebration",
+    "sunshine through trees",
+    "balloons sky",
+    "fireworks night",
+  ],
+  Scripture: [
+    "candle flame",
+    "open bible",
+    "praying hands",
+    "church interior",
+    "stained glass window",
+  ],
+  Peaceful: [
+    "sunset clouds",
+    "calm lake",
+    "starry night sky",
+    "gentle waves beach",
+    "misty morning",
+  ],
+  Family: [
+    "family embrace",
+    "holding hands",
+    "family silhouette sunset",
+    "parent child walking",
+  ],
+  Hope: [
+    "sunrise horizon",
+    "light breaking through clouds",
+    "dove flying",
+    "sunbeams clouds",
+  ],
 };
 
-const PER_CATEGORY_LIMIT = 6; // max clips to import per category per run
-const PER_QUERY_RESULTS = 5;
+const PER_CATEGORY_LIMIT = 10; // max clips to import per category per run
+const PER_QUERY_RESULTS = 8;
 
 async function searchPexels(query) {
   const url = `https://api.pexels.com/videos/search?query=${encodeURIComponent(

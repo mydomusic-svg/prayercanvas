@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import type { MusicStyle, RenderJob, Style } from "@/lib/types";
+import type { MusicStyle, PhotoStyle, RenderJob, Style } from "@/lib/types";
 
 // Lets the owner swap the background or music on an already-rendered prayer
 // without re-recording or re-transcribing anything. A full "regenerate"
@@ -42,20 +42,27 @@ export default function MediaEditor({
   const [expanded, setExpanded] = useState(false);
   const [styles, setStyles] = useState<Style[]>([]);
   const [musicStyles, setMusicStyles] = useState<MusicStyle[]>([]);
+  const [photoStyles, setPhotoStyles] = useState<PhotoStyle[]>([]);
   const [loaded, setLoaded] = useState(false);
 
-  // "background mode" mirrors create/page.tsx: either a library style
-  // (picked by category, specific clip randomized at submit) or a
-  // user-uploaded photo. Seeded from whatever the prayer currently has so
-  // opening this panel doesn't look like it reset your choice.
-  const [backgroundMode, setBackgroundMode] = useState<"library" | "photo">(
-    currentPhotoAssetUrl ? "photo" : "library"
-  );
+  // "background mode" mirrors create/page.tsx: a library style (picked by
+  // category, specific clip randomized at submit), a user-uploaded photo,
+  // or a curated library photo. Seeded from whatever the prayer currently
+  // has so opening this panel doesn't look like it reset your choice — see
+  // the photoStyles-lookup effect below, which resolves "photo" into
+  // "upload" vs "libraryPhoto" once the library has loaded (a plain
+  // currentPhotoAssetUrl alone can't tell the two apart).
+  const [backgroundMode, setBackgroundMode] = useState<
+    "library" | "upload" | "libraryPhoto"
+  >(currentPhotoAssetUrl ? "upload" : "library");
   const [selectedStyleCategory, setSelectedStyleCategory] = useState<string | null>(
     null
   );
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  const [libraryPhotoUrl, setLibraryPhotoUrl] = useState<string | null>(null);
+  const [photoLibraryOpen, setPhotoLibraryOpen] = useState(false);
+  const [photoCategory, setPhotoCategory] = useState<string | null>(null);
 
   const [selectedMusicStyleId, setSelectedMusicStyleId] = useState<string | null>(
     currentMusicStyleId
@@ -77,11 +84,18 @@ export default function MediaEditor({
         .select("id, name, music_asset, category, source, license")
         .order("category", { ascending: true })
         .order("created_at", { ascending: true }),
-    ]).then(([stylesRes, musicRes]) => {
+      supabase
+        .from("photo_styles")
+        .select("id, name, image_asset, category, source, license")
+        .order("category", { ascending: true })
+        .order("created_at", { ascending: true }),
+    ]).then(([stylesRes, musicRes, photoRes]) => {
       const fetchedStyles = (stylesRes.data as Style[] | null) ?? [];
       const fetchedMusic = (musicRes.data as MusicStyle[] | null) ?? [];
+      const fetchedPhotos = (photoRes.data as PhotoStyle[] | null) ?? [];
       setStyles(fetchedStyles);
       setMusicStyles(fetchedMusic);
+      setPhotoStyles(fetchedPhotos);
 
       const currentStyle = fetchedStyles.find((s) => s.id === currentStyleId);
       setSelectedStyleCategory(
@@ -91,16 +105,47 @@ export default function MediaEditor({
       const currentMusic = fetchedMusic.find((m) => m.id === currentMusicStyleId);
       setMusicCategory(currentMusic?.category ?? fetchedMusic[0]?.category ?? null);
 
+      // A plain photo_asset_url can't tell an uploaded photo apart from a
+      // library one — check whether it matches a known library photo.
+      if (currentPhotoAssetUrl) {
+        const matchingLibraryPhoto = fetchedPhotos.find(
+          (p) => p.image_asset === currentPhotoAssetUrl
+        );
+        if (matchingLibraryPhoto) {
+          setBackgroundMode("libraryPhoto");
+          setLibraryPhotoUrl(matchingLibraryPhoto.image_asset);
+          setPhotoCategory(matchingLibraryPhoto.category ?? null);
+        } else {
+          setBackgroundMode("upload");
+        }
+      }
+
       setLoaded(true);
     });
-  }, [expanded, loaded, supabase, currentStyleId, currentMusicStyleId]);
+  }, [expanded, loaded, supabase, currentStyleId, currentMusicStyleId, currentPhotoAssetUrl]);
 
   function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     setPhotoFile(file);
     setPhotoPreviewUrl(URL.createObjectURL(file));
-    setBackgroundMode("photo");
+    setBackgroundMode("upload");
+    setLibraryPhotoUrl(null);
+  }
+
+  function selectLibraryPhoto(url: string) {
+    setLibraryPhotoUrl(url);
+    setBackgroundMode("libraryPhoto");
+    setPhotoFile(null);
+    setPhotoPreviewUrl(null);
+  }
+
+  function selectStyleCategory(category: string) {
+    setBackgroundMode("library");
+    setSelectedStyleCategory(category);
+    setPhotoFile(null);
+    setPhotoPreviewUrl(null);
+    setLibraryPhotoUrl(null);
   }
 
   function pickRandomStyleId(category: string | null): string | null {
@@ -112,14 +157,25 @@ export default function MediaEditor({
     return options[Math.floor(Math.random() * options.length)].id;
   }
 
+  // What mode the prayer is ACTUALLY in right now, independent of whatever
+  // the user has clicked around to in this panel — resolved once the photo
+  // library has loaded (see the effect above) and otherwise unchanged.
+  const initialMode: "library" | "upload" | "libraryPhoto" = !currentPhotoAssetUrl
+    ? "library"
+    : photoStyles.some((p) => p.image_asset === currentPhotoAssetUrl)
+      ? "libraryPhoto"
+      : "upload";
+
   const musicChanged = selectedMusicStyleId !== currentMusicStyleId;
   const backgroundChanged =
-    backgroundMode === "photo"
-      ? Boolean(photoFile) // only a genuinely new upload counts as a change
-      : !currentPhotoAssetUrl
+    backgroundMode !== initialMode
+      ? true
+      : backgroundMode === "library"
         ? selectedStyleCategory !==
           (styles.find((s) => s.id === currentStyleId)?.category ?? null)
-        : true; // switching away from a photo to a library style is always a change
+        : backgroundMode === "upload"
+          ? Boolean(photoFile) // only a genuinely new upload counts as a change
+          : libraryPhotoUrl !== currentPhotoAssetUrl;
   const hasChanges = musicChanged || backgroundChanged;
 
   async function handleUpdate() {
@@ -141,7 +197,7 @@ export default function MediaEditor({
       }
 
       if (backgroundChanged) {
-        if (backgroundMode === "photo") {
+        if (backgroundMode === "upload") {
           if (photoFile) {
             const ext = photoFile.name.split(".").pop()?.toLowerCase() || "jpg";
             const photoPath = `${userId}/${prayerId}/photo.${ext}`;
@@ -160,6 +216,13 @@ export default function MediaEditor({
             finalPhotoAssetUrl = publicUrl.publicUrl;
           }
           updates.style_id = null;
+          finalStyleId = null;
+        } else if (backgroundMode === "libraryPhoto") {
+          // Already hosted in our own Storage bucket — no upload needed,
+          // just point the prayer at it directly.
+          updates.photo_asset_url = libraryPhotoUrl;
+          updates.style_id = null;
+          finalPhotoAssetUrl = libraryPhotoUrl;
           finalStyleId = null;
         } else {
           const newStyleId = pickRandomStyleId(selectedStyleCategory);
@@ -246,7 +309,7 @@ export default function MediaEditor({
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                   <label
                     className={`flex cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden rounded-lg border px-2 py-3 text-center text-xs transition ${
-                      backgroundMode === "photo"
+                      backgroundMode === "upload"
                         ? "border-sage-600 bg-sage-600 text-white"
                         : "border-dashed border-sage-400 text-sage-600 hover:bg-sage-50"
                     }`}
@@ -261,7 +324,7 @@ export default function MediaEditor({
                         />
                         <span>New photo (tap to change)</span>
                       </>
-                    ) : backgroundMode === "photo" && currentPhotoAssetUrl ? (
+                    ) : backgroundMode === "upload" && currentPhotoAssetUrl ? (
                       <span>📷 Current photo (tap to replace)</span>
                     ) : (
                       <span>📷 Upload a photo</span>
@@ -273,14 +336,36 @@ export default function MediaEditor({
                       className="hidden"
                     />
                   </label>
+                  {photoStyles.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setPhotoLibraryOpen((v) => !v)}
+                      className={`flex cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden rounded-lg border px-2 py-3 text-center text-xs transition ${
+                        backgroundMode === "libraryPhoto"
+                          ? "border-sage-600 bg-sage-600 text-white"
+                          : "border-dashed border-sage-400 text-sage-600 hover:bg-sage-50"
+                      }`}
+                    >
+                      {backgroundMode === "libraryPhoto" && libraryPhotoUrl ? (
+                        <>
+                          {/* eslint-disable-next-line @next/next/no-img-element -- remote thumbnail */}
+                          <img
+                            src={libraryPhotoUrl}
+                            alt=""
+                            className="h-12 w-12 rounded object-cover"
+                          />
+                          <span>Library photo (tap to change)</span>
+                        </>
+                      ) : (
+                        <span>🖼️ Photo library</span>
+                      )}
+                    </button>
+                  )}
                   {categories.map((cat) => (
                     <button
                       key={cat}
                       type="button"
-                      onClick={() => {
-                        setBackgroundMode("library");
-                        setSelectedStyleCategory(cat);
-                      }}
+                      onClick={() => selectStyleCategory(cat)}
                       className={`rounded-lg border px-3 py-3 text-xs transition ${
                         backgroundMode === "library" && selectedStyleCategory === cat
                           ? "border-sage-600 bg-sage-600 text-white"
@@ -297,6 +382,69 @@ export default function MediaEditor({
                     clip isn&apos;t chosen until you hit update.
                   </p>
                 )}
+                {photoLibraryOpen && photoStyles.length > 0 && (() => {
+                  const photoCategories = Array.from(
+                    new Set(photoStyles.map((p) => p.category || "Other"))
+                  );
+                  const visiblePhotos = photoCategory
+                    ? photoStyles.filter((p) => (p.category || "Other") === photoCategory)
+                    : photoStyles;
+                  return (
+                    <div className="flex flex-col gap-2 rounded-lg border border-sage-200 p-3">
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setPhotoCategory(null)}
+                          className={`rounded-full border px-3 py-1 text-xs transition ${
+                            photoCategory === null
+                              ? "border-sage-600 bg-sage-600 text-white"
+                              : "border-sage-300 text-sage-600 hover:bg-sage-50"
+                          }`}
+                        >
+                          All
+                        </button>
+                        {photoCategories.map((cat) => (
+                          <button
+                            key={cat}
+                            type="button"
+                            onClick={() => setPhotoCategory(cat)}
+                            className={`rounded-full border px-3 py-1 text-xs transition ${
+                              photoCategory === cat
+                                ? "border-sage-600 bg-sage-600 text-white"
+                                : "border-sage-300 text-sage-600 hover:bg-sage-50"
+                            }`}
+                          >
+                            {cat}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="grid max-h-64 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4">
+                        {visiblePhotos.map((photo) => (
+                          <button
+                            key={photo.id}
+                            type="button"
+                            onClick={() => {
+                              selectLibraryPhoto(photo.image_asset);
+                              setPhotoLibraryOpen(false);
+                            }}
+                            className={`overflow-hidden rounded-lg border-2 transition ${
+                              libraryPhotoUrl === photo.image_asset
+                                ? "border-sage-600"
+                                : "border-transparent hover:border-sage-300"
+                            }`}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element -- remote thumbnail grid */}
+                            <img
+                              src={photo.image_asset}
+                              alt={photo.name}
+                              className="aspect-[9/16] w-full object-cover"
+                            />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })()}

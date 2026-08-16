@@ -66,6 +66,20 @@ export interface MusicStyle {
   license: string | null;
 }
 
+// Curated stock-photo library (see supabase/migrations/0014_photo_styles.sql
+// and scripts/seed-photo-library.mjs) — an alternative to uploading your own
+// photo for the Ken Burns background. Picking one just sets
+// prayers.photo_asset_url directly to image_asset, since it's already
+// hosted in the public style-assets bucket.
+export interface PhotoStyle {
+  id: string;
+  name: string;
+  image_asset: string;
+  category: string | null;
+  source: string | null;
+  license: string | null;
+}
+
 export interface RenderJob {
   id: string;
   prayer_id: string;

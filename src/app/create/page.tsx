@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import HeroBanner from "../hero-banner";
-import type { AccentColor, MusicStyle, Style, TextStyle } from "@/lib/types";
+import type { AccentColor, MusicStyle, PhotoStyle, Style, TextStyle } from "@/lib/types";
 
 type RecordingState = "idle" | "recording" | "recorded";
 
@@ -125,6 +125,15 @@ export default function CreatePrayerPage() {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
 
+  // A second alternative: a curated stock photo instead of an upload (see
+  // 0014_photo_styles.sql / scripts/seed-photo-library.mjs). Since these are
+  // already hosted in our own Storage bucket, picking one just needs the
+  // URL — no upload step at submit time, unlike photoFile.
+  const [photoStyles, setPhotoStyles] = useState<PhotoStyle[]>([]);
+  const [photoLibraryOpen, setPhotoLibraryOpen] = useState(false);
+  const [photoCategory, setPhotoCategory] = useState<string | null>(null);
+  const [libraryPhotoUrl, setLibraryPhotoUrl] = useState<string | null>(null);
+
   const [submitting, setSubmitting] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -161,6 +170,14 @@ export default function CreatePrayerPage() {
             setMusicCategory(data[0].category ?? null);
           }
         }
+      });
+    supabase
+      .from("photo_styles")
+      .select("id, name, image_asset, category, source, license")
+      .order("category", { ascending: true })
+      .order("created_at", { ascending: true })
+      .then(({ data }) => {
+        if (data) setPhotoStyles(data as PhotoStyle[]);
       });
   }, [supabase]);
 
@@ -215,12 +232,20 @@ export default function CreatePrayerPage() {
     if (!file) return;
     setPhotoFile(file);
     setPhotoPreviewUrl(URL.createObjectURL(file));
+    setLibraryPhotoUrl(null);
+  }
+
+  function selectLibraryPhoto(url: string) {
+    setLibraryPhotoUrl(url);
+    setPhotoFile(null);
+    setPhotoPreviewUrl(null);
   }
 
   function selectStyleCategory(category: string) {
     setSelectedStyleCategory(category);
     setPhotoFile(null);
     setPhotoPreviewUrl(null);
+    setLibraryPhotoUrl(null);
   }
 
   // The picker only shows category tiles ("Celebration", "Nature", ...) —
@@ -260,8 +285,11 @@ export default function CreatePrayerPage() {
       // 1. Create the prayer row. The style picker only shows categories
       //    (see selectStyleCategory) — the specific clip within that
       //    category is randomized here, at the last possible moment, rather
-      //    than when the category was clicked.
-      const styleId = photoFile ? null : pickRandomStyleId(selectedStyleCategory);
+      //    than when the category was clicked. A library photo (unlike an
+      //    uploaded one) is already a public URL, so it can go straight into
+      //    the initial insert — no separate upload step needed for it.
+      const usingPhoto = Boolean(photoFile || libraryPhotoUrl);
+      const styleId = usingPhoto ? null : pickRandomStyleId(selectedStyleCategory);
       const { data: prayer, error: prayerError } = await supabase
         .from("prayers")
         .insert({
@@ -270,6 +298,7 @@ export default function CreatePrayerPage() {
           include_recipient_in_title: Boolean(recipientName.trim()) && includeRecipientInTitle,
           occasion: occasion || null,
           style_id: styleId,
+          photo_asset_url: photoFile ? null : libraryPhotoUrl,
           music_style_id: selectedMusicStyleId,
           text_style: textStyle,
           accent_color: accentColor,
@@ -507,13 +536,38 @@ export default function CreatePrayerPage() {
                   className="hidden"
                 />
               </label>
+              {photoStyles.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setPhotoLibraryOpen((v) => !v)}
+                  className={`flex cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden rounded-lg border px-2 py-3 text-center text-sm transition ${
+                    libraryPhotoUrl
+                      ? "border-sage-600 bg-sage-600 text-white"
+                      : "border-dashed border-sage-400 text-sage-600 hover:bg-sage-50"
+                  }`}
+                >
+                  {libraryPhotoUrl ? (
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element -- remote thumbnail, not worth Next/Image's overhead for a small picker tile */}
+                      <img
+                        src={libraryPhotoUrl}
+                        alt=""
+                        className="h-16 w-16 rounded object-cover"
+                      />
+                      <span className="text-xs">Library photo (tap to change)</span>
+                    </>
+                  ) : (
+                    <span>🖼️ Browse photo library</span>
+                  )}
+                </button>
+              )}
               {categories.map((cat) => (
                 <button
                   key={cat}
                   type="button"
                   onClick={() => selectStyleCategory(cat)}
                   className={`rounded-lg border px-4 py-3 text-sm transition ${
-                    !photoFile && selectedStyleCategory === cat
+                    !photoFile && !libraryPhotoUrl && selectedStyleCategory === cat
                       ? "border-sage-600 bg-sage-600 text-white"
                       : "border-sage-300 hover:bg-sage-50"
                   }`}
@@ -522,12 +576,76 @@ export default function CreatePrayerPage() {
                 </button>
               ))}
             </div>
-            {photoFile && (
+            {(photoFile || libraryPhotoUrl) && (
               <p className="text-xs text-sage-400">
-                Your photo will move with a gentle pan &amp; zoom (Ken Burns)
-                effect instead of using a library video.
+                {photoFile ? "Your photo" : "The selected photo"} will move
+                with a gentle pan &amp; zoom (Ken Burns) effect instead of
+                using a library video.
               </p>
             )}
+            {photoLibraryOpen && photoStyles.length > 0 && (() => {
+              const photoCategories = Array.from(
+                new Set(photoStyles.map((p) => p.category || "Other"))
+              );
+              const visiblePhotos = photoCategory
+                ? photoStyles.filter((p) => (p.category || "Other") === photoCategory)
+                : photoStyles;
+              return (
+                <div className="flex flex-col gap-2 rounded-lg border border-sage-200 p-3">
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPhotoCategory(null)}
+                      className={`rounded-full border px-3 py-1 text-xs transition ${
+                        photoCategory === null
+                          ? "border-sage-600 bg-sage-600 text-white"
+                          : "border-sage-300 text-sage-600 hover:bg-sage-50"
+                      }`}
+                    >
+                      All
+                    </button>
+                    {photoCategories.map((cat) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setPhotoCategory(cat)}
+                        className={`rounded-full border px-3 py-1 text-xs transition ${
+                          photoCategory === cat
+                            ? "border-sage-600 bg-sage-600 text-white"
+                            : "border-sage-300 text-sage-600 hover:bg-sage-50"
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="grid max-h-64 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4">
+                    {visiblePhotos.map((photo) => (
+                      <button
+                        key={photo.id}
+                        type="button"
+                        onClick={() => {
+                          selectLibraryPhoto(photo.image_asset);
+                          setPhotoLibraryOpen(false);
+                        }}
+                        className={`overflow-hidden rounded-lg border-2 transition ${
+                          libraryPhotoUrl === photo.image_asset
+                            ? "border-sage-600"
+                            : "border-transparent hover:border-sage-300"
+                        }`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element -- remote thumbnail grid, Next/Image's remote-pattern config isn't worth it for a seeded stock library */}
+                        <img
+                          src={photo.image_asset}
+                          alt={photo.name}
+                          className="aspect-[9/16] w-full object-cover"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
           </section>
         );
       })()}
