@@ -50,11 +50,13 @@ const BUCKET = "style-assets";
 // seed-photo-library.mjs: Nature, Cinematic, Minimal, Celebration,
 // Scripture, Peaceful, Family, Hope.
 //
-// Two files from this drop were intentionally left out of the manifest:
-//   - "ChatGPT Image Aug 16, 2026, 07_32_10 PM.png" and "...07_33_10 PM.png"
-//     are 3x3 moodboard/collage grids (many small unrelated photos tiled
-//     together), not a single usable background — Ken Burns panning across
-//     a contact sheet would look like a broken grid on screen, not a photo.
+// Some files dropped into the source folder were intentionally left out of
+// the manifest:
+//   - "ChatGPT Image Aug 16, 2026, 07_32_10 PM.png", "...07_33_10 PM.png",
+//     and "...07_57_34 PM.png" are moodboard/collage grids (many small
+//     unrelated photos tiled together), not a single usable background —
+//     Ken Burns panning across a contact sheet would look like a broken
+//     grid on screen, not a photo.
 //   - "ChatGPT Image Aug 16, 2026, 07_39_00 PM.png" is a UI mockup
 //     screenshot (a redesigned video-library picker with play-icon
 //     overlays), not a background photo at all.
@@ -72,6 +74,10 @@ const MANIFEST = {
   "spring-photograph-with-beautiful-flowers.jpg": {
     name: "Peaceful — spring flower bouquet",
     category: "Peaceful",
+  },
+  "ChatGPT Image Aug 16, 2026, 07_53_04 PM.png": {
+    name: "Nature — sunlit forest stream",
+    category: "Nature",
   },
 };
 
