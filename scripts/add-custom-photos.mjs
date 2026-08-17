@@ -60,6 +60,12 @@ const BUCKET = "style-assets";
 //   - "ChatGPT Image Aug 16, 2026, 07_39_00 PM.png" is a UI mockup
 //     screenshot (a redesigned video-library picker with play-icon
 //     overlays), not a background photo at all.
+//   - The whole "ChatGPT Image Aug 16, 2026, 08_11_*" batch (10 files) is a
+//     near-duplicate re-generation of the same 10 scenes as the
+//     "08_08_*" batch (same mountain lake, butterfly meadow, galaxy,
+//     kids, beach, waterfall, sunrise silhouette, stacked stones, candle,
+//     dove) — only the 08_08_* copy of each scene was kept, to avoid the
+//     library feeling repetitive with visually-identical entries.
 // If any of those should actually be split into individual images and
 // added, crop them down to single photos first, then add entries here.
 const MANIFEST = {
@@ -78,6 +84,46 @@ const MANIFEST = {
   "ChatGPT Image Aug 16, 2026, 07_53_04 PM.png": {
     name: "Nature — sunlit forest stream",
     category: "Nature",
+  },
+  "ChatGPT Image Aug 16, 2026, 08_08_41 PM (1).png": {
+    name: "Nature — mountain lake at sunrise",
+    category: "Nature",
+  },
+  "ChatGPT Image Aug 16, 2026, 08_08_41 PM (2).png": {
+    name: "Nature — butterflies over a wildflower meadow",
+    category: "Nature",
+  },
+  "ChatGPT Image Aug 16, 2026, 08_08_42 PM (3).png": {
+    name: "Cinematic — spiral galaxy above a planet",
+    category: "Cinematic",
+  },
+  "ChatGPT Image Aug 16, 2026, 08_08_42 PM (4).png": {
+    name: "Family — kids laughing together outdoors",
+    category: "Family",
+  },
+  "ChatGPT Image Aug 16, 2026, 08_08_42 PM (5).png": {
+    name: "Peaceful — tropical beach with palm trees",
+    category: "Peaceful",
+  },
+  "ChatGPT Image Aug 16, 2026, 08_08_42 PM (6).png": {
+    name: "Nature — jungle waterfall into a turquoise pool",
+    category: "Nature",
+  },
+  "ChatGPT Image Aug 16, 2026, 08_08_43 PM (7).png": {
+    name: "Hope — arms raised toward a mountain sunrise",
+    category: "Hope",
+  },
+  "ChatGPT Image Aug 16, 2026, 08_08_43 PM (8).png": {
+    name: "Minimal — stacked stones with a green leaf",
+    category: "Minimal",
+  },
+  "ChatGPT Image Aug 16, 2026, 08_08_44 PM (9).png": {
+    name: "Peaceful — candlelight on a cozy blanket",
+    category: "Peaceful",
+  },
+  "ChatGPT Image Aug 16, 2026, 08_08_44 PM (10).png": {
+    name: "Hope — dove flying in a sunlit sky",
+    category: "Hope",
   },
 };
 
