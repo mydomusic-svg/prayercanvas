@@ -66,6 +66,10 @@ const BUCKET = "style-assets";
 //     kids, beach, waterfall, sunrise silhouette, stacked stones, candle,
 //     dove) — only the 08_08_* copy of each scene was kept, to avoid the
 //     library feeling repetitive with visually-identical entries.
+//   - "ChatGPT Image Aug 16, 2026, 08_23_23 PM (1).png", "...(2).png",
+//     "...08_23_24 PM (4).png", "...08_23_25 PM (6).png", and
+//     "...08_23_25 PM (7).png" are 2x5 moodboard/collage grids, same issue
+//     as the earlier grid files.
 // If any of those should actually be split into individual images and
 // added, crop them down to single photos first, then add entries here.
 const MANIFEST = {
@@ -123,6 +127,14 @@ const MANIFEST = {
   },
   "ChatGPT Image Aug 16, 2026, 08_08_44 PM (10).png": {
     name: "Hope — dove flying in a sunlit sky",
+    category: "Hope",
+  },
+  "ChatGPT Image Aug 16, 2026, 08_23_24 PM (3).png": {
+    name: "Cinematic — dramatic beach cliff sunset",
+    category: "Cinematic",
+  },
+  "ChatGPT Image Aug 16, 2026, 08_23_25 PM (5).png": {
+    name: "Hope — lighthouse on a coastal cliff at sunset",
     category: "Hope",
   },
 };
