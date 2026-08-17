@@ -664,9 +664,12 @@ async function generateThumbnail({
     "utf8"
   );
 
-  // Light themes (e.g. "Minimal") need a light scrim so the dark accent/body
-  // text stays readable; dark themes need a dark scrim under white text.
-  const scrimColor = theme.text === "black" ? "white@0.6" : "black@0.42";
+  // Light themes (e.g. "Minimal") need a light outline so dark accent/body
+  // text stays readable; dark themes need a dark outline under white text.
+  // (Previously a solid drawbox scrim sat behind the text instead — see the
+  // matching change in buildFilterComplex for why that was replaced with a
+  // plain text outline + shadow.)
+  const bodyBorderColor = theme.text === "black" ? "white@0.85" : "black@0.6";
 
   // Softly blur the background photo behind the text (like a magazine
   // pull-quote card) rather than leaving it sharp — a real render came back
@@ -693,14 +696,11 @@ async function generateThumbnail({
     filters.push(`[0:v]${BG_BLUR}[bg]`);
     currentLabel = "bg";
   }
-  filters.push(
-    `[${currentLabel}]drawbox=x=0:y=440:w=1080:h=1040:color=${scrimColor}:t=fill[s1]`
-  );
   // Keeps the user's picked accent color (personalization) for the title —
   // the dark outline + shadow guarantees legibility regardless of which
   // color was picked or how bright the background photo happens to be.
   filters.push(
-    `[s1]drawtext=textfile='${titleLinesPath}':fontfile='${textStyle.font}':fontsize=${textStyle.thumbFontSize}:fontcolor=${accentColor}:` +
+    `[${currentLabel}]drawtext=textfile='${titleLinesPath}':fontfile='${textStyle.font}':fontsize=${textStyle.thumbFontSize}:fontcolor=${accentColor}:` +
       `bordercolor=black@0.55:borderw=${textStyle.titleBorderW}:shadowcolor=black@0.35:shadowx=2:shadowy=2:` +
       `line_spacing=6:x=(w-text_w)/2:y=530[s2]`
   );
@@ -715,7 +715,9 @@ async function generateThumbnail({
   const titleBlockHeight = titleLineCount * (textStyle.thumbFontSize * 1.25 + 6);
   const bodyY = Math.round(TITLE_TOP_Y + titleBlockHeight + 40);
   filters.push(
-    `[s2]drawtext=textfile='${bodyLinesPath}':fontfile='${FONT_SERIF}':fontsize=40:fontcolor=${theme.text}:line_spacing=20:x=(w-text_w)/2:y=${bodyY}[s3]`
+    `[s2]drawtext=textfile='${bodyLinesPath}':fontfile='${FONT_SERIF}':fontsize=40:fontcolor=${theme.text}:` +
+      `bordercolor=${bodyBorderColor}:borderw=2:shadowcolor=black@0.35:shadowx=2:shadowy=2:` +
+      `line_spacing=20:x=(w-text_w)/2:y=${bodyY}[s3]`
   );
   // Same brand watermark as the video itself (icon + spelled-out name — see
   // buildFilterComplex) — input 1 is the logo image, added below.
@@ -873,32 +875,27 @@ function buildFilterComplex({
   // just the bare background, matching what the in-app thumbnail looks
   // like — that's still true at t=0 since the card is always on now.
   if (openingBodyPath) {
-    // The scrim/body used to start at a fixed y=460 regardless of how tall
-    // the title above it rendered. A short one-line title left plenty of
-    // room, but a long title wrapped onto 3+ lines (seen with "Bryan, Your
-    // Wonderful Day Awaits" in the calligraphy font) ran straight into the
-    // body text. Push the card down based on the title's actual wrapped
-    // line count instead of assuming it's always short. The multiplier is a
-    // conservative per-line height estimate (font size plus drawtext's own
-    // line_spacing=10 plus a little slack for descenders/swashes on the
-    // script fonts); the bottom edge stays anchored near the captions area
-    // so the card never grows unboundedly for very long titles.
+    // Used to sit on a solid drawbox "card" (a big semi-transparent
+    // rectangle) for contrast — that read as a gray/black bar smothering
+    // half the photo. Replaced with the same treatment the title above
+    // already uses: a dark/light outline + drop shadow burned directly onto
+    // the letters, no background rectangle at all. The photo now shows
+    // through fully behind the text, and the outline still guarantees
+    // legibility regardless of how busy or bright the background is.
+    //
+    // bodyY still depends on the title's actual wrapped line count so a
+    // long, multi-line title (e.g. "Bryan, Your Wonderful Day Awaits" in the
+    // calligraphy font) doesn't run straight into the body text below it.
     const TITLE_TOP_Y = 140;
     const titleBlockHeight = titleLineCount * (textStyle.videoFontSize * 1.25 + 10);
     const cardTop = Math.max(460, Math.round(TITLE_TOP_Y + titleBlockHeight + 40));
-    const cardBottom = 1460;
-    const cardHeight = Math.max(200, cardBottom - cardTop);
     const bodyY = cardTop + 100;
 
-    const scrimColor = theme.text === "black" ? "white@0.6" : "black@0.42";
-    nextLabel = "vcard1";
-    filters.push(
-      `[${currentLabel}]drawbox=x=0:y=${cardTop}:w=1080:h=${cardHeight}:color=${scrimColor}:t=fill[${nextLabel}]`
-    );
-    currentLabel = nextLabel;
+    const bodyBorderColor = theme.text === "black" ? "white@0.85" : "black@0.6";
     nextLabel = "vcard2";
     filters.push(
       `[${currentLabel}]drawtext=textfile='${openingBodyPath}':fontfile='${FONT_SERIF}':fontsize=40:fontcolor=${theme.text}:` +
+        `bordercolor=${bodyBorderColor}:borderw=2:shadowcolor=black@0.35:shadowx=2:shadowy=2:` +
         `line_spacing=20:x=(w-text_w)/2:y=${bodyY}[${nextLabel}]`
     );
     currentLabel = nextLabel;
