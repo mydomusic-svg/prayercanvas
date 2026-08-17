@@ -154,11 +154,30 @@ async function main() {
     process.exit(1);
   }
 
+  // Safe to re-run: skip any manifest entry whose `name` already exists in
+  // photo_styles, so running this script again after adding new entries to
+  // MANIFEST doesn't re-insert (and duplicate) photos that were already
+  // imported by an earlier run.
+  const { data: existingRows, error: existingError } = await supabase
+    .from("photo_styles")
+    .select("name");
+  if (existingError) {
+    console.error(`Failed to check existing photos: ${existingError.message}`);
+    process.exit(1);
+  }
+  const existingNames = new Set((existingRows || []).map((r) => r.name));
+
   const entries = Object.entries(MANIFEST);
   let imported = 0;
+  let skipped = 0;
   const failed = [];
 
   for (const [filename, { name, category }] of entries) {
+    if (existingNames.has(name)) {
+      console.log(`Skipping "${name}" — already in photo_styles.`);
+      skipped++;
+      continue;
+    }
     const localPath = path.join(folder, filename);
     try {
       const contentType = contentTypeFor(filename);
@@ -191,7 +210,9 @@ async function main() {
     }
   }
 
-  console.log(`\nImported ${imported}/${entries.length} custom photos.`);
+  console.log(
+    `\nImported ${imported}/${entries.length} custom photos (${skipped} already present, skipped).`
+  );
   if (failed.length) {
     console.log(`Failed: ${failed.join(", ")}`);
     process.exitCode = 1;
