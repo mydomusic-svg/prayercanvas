@@ -5,7 +5,14 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import HeroBanner from "../hero-banner";
-import type { AccentColor, MusicStyle, PhotoStyle, Style, TextStyle } from "@/lib/types";
+import type {
+  AccentColor,
+  CartoonCharacter,
+  MusicStyle,
+  PhotoStyle,
+  Style,
+  TextStyle,
+} from "@/lib/types";
 
 type RecordingState = "idle" | "recording" | "recorded";
 
@@ -134,6 +141,15 @@ export default function CreatePrayerPage() {
   const [photoCategory, setPhotoCategory] = useState<string | null>(null);
   const [libraryPhotoUrl, setLibraryPhotoUrl] = useState<string | null>(null);
 
+  // Funny Cartoon category (0015_cartoon_characters.sql): picking a
+  // character replaces the normal photo/video style + text-style/accent-
+  // color choices below entirely — the render worker shows just the
+  // character's portrait with no on-screen prayer text, voiced by an AI TTS
+  // track instead of the recording above (which is still needed, since it's
+  // how the prayer's actual words get captured/transcribed).
+  const [cartoonCharacters, setCartoonCharacters] = useState<CartoonCharacter[]>([]);
+  const [cartoonCharacterId, setCartoonCharacterId] = useState<string | null>(null);
+
   const [submitting, setSubmitting] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -179,7 +195,25 @@ export default function CreatePrayerPage() {
       .then(({ data }) => {
         if (data) setPhotoStyles(data as PhotoStyle[]);
       });
+    supabase
+      .from("cartoon_characters")
+      .select("id, name, image_asset, openai_voice, pitch_ratio, category, source, license")
+      .order("created_at", { ascending: true })
+      .then(({ data }) => {
+        if (data) setCartoonCharacters(data as CartoonCharacter[]);
+      });
   }, [supabase]);
+
+  function selectCartoonCharacter(id: string | null) {
+    setCartoonCharacterId(id);
+    // A cartoon character replaces the photo/video background entirely —
+    // clear any of those choices so submit doesn't end up with both set.
+    if (id) {
+      setPhotoFile(null);
+      setPhotoPreviewUrl(null);
+      setLibraryPhotoUrl(null);
+    }
+  }
 
   async function startRecording() {
     setError(null);
@@ -288,8 +322,13 @@ export default function CreatePrayerPage() {
       //    than when the category was clicked. A library photo (unlike an
       //    uploaded one) is already a public URL, so it can go straight into
       //    the initial insert — no separate upload step needed for it.
-      const usingPhoto = Boolean(photoFile || libraryPhotoUrl);
-      const styleId = usingPhoto ? null : pickRandomStyleId(selectedStyleCategory);
+      // A cartoon character takes priority over any photo/video style — the
+      // picker below clears the other two when one is chosen, but prefer
+      // the more specific explicit choice defensively here too.
+      const usingCartoon = Boolean(cartoonCharacterId);
+      const usingPhoto = !usingCartoon && Boolean(photoFile || libraryPhotoUrl);
+      const styleId =
+        usingCartoon || usingPhoto ? null : pickRandomStyleId(selectedStyleCategory);
       const { data: prayer, error: prayerError } = await supabase
         .from("prayers")
         .insert({
@@ -298,10 +337,11 @@ export default function CreatePrayerPage() {
           include_recipient_in_title: Boolean(recipientName.trim()) && includeRecipientInTitle,
           occasion: occasion || null,
           style_id: styleId,
-          photo_asset_url: photoFile ? null : libraryPhotoUrl,
+          photo_asset_url: usingCartoon ? null : photoFile ? null : libraryPhotoUrl,
           music_style_id: selectedMusicStyleId,
           text_style: textStyle,
           accent_color: accentColor,
+          cartoon_character_id: cartoonCharacterId,
           privacy: "private",
         })
         .select()
@@ -496,7 +536,51 @@ export default function CreatePrayerPage() {
         </label>
       </section>
 
-      {styles.length > 0 && (() => {
+      {cartoonCharacters.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <p className="text-sm font-medium">🎭 Funny Cartoon (optional)</p>
+          <p className="text-xs text-sage-400">
+            Pick a character to have your prayer read aloud in a silly voice
+            by that character instead of your own recorded voice — no text
+            is shown on screen, just the character.
+          </p>
+          <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
+            <button
+              type="button"
+              onClick={() => selectCartoonCharacter(null)}
+              className={`flex flex-col items-center justify-center gap-1 rounded-lg border px-2 py-3 text-center text-xs transition ${
+                !cartoonCharacterId
+                  ? "border-sage-600 bg-sage-600 text-white"
+                  : "border-dashed border-sage-400 text-sage-600 hover:bg-sage-50"
+              }`}
+            >
+              None
+            </button>
+            {cartoonCharacters.map((character) => (
+              <button
+                key={character.id}
+                type="button"
+                onClick={() => selectCartoonCharacter(character.id)}
+                className={`flex flex-col items-center gap-1 overflow-hidden rounded-lg border-2 p-1 text-center text-xs transition ${
+                  cartoonCharacterId === character.id
+                    ? "border-sage-600"
+                    : "border-transparent hover:border-sage-300"
+                }`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element -- remote thumbnail grid, same as the photo library picker above */}
+                <img
+                  src={character.image_asset}
+                  alt={character.name}
+                  className="aspect-square w-full rounded object-cover"
+                />
+                <span className="text-sage-600">{character.name}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {!cartoonCharacterId && styles.length > 0 && (() => {
         // One tile per category (e.g. "Celebration"), not one per clip —
         // the library has many clips per category (see /credits), which
         // made this grid long and repetitive. The specific clip is chosen
@@ -698,6 +782,7 @@ export default function CreatePrayerPage() {
         );
       })()}
 
+      {!cartoonCharacterId && (
       <section className="flex flex-col gap-3">
         <p className="text-sm font-medium">Text style</p>
         <div className="grid grid-cols-3 gap-3">
@@ -753,6 +838,7 @@ export default function CreatePrayerPage() {
           Applied to the title in your video and its thumbnail.
         </p>
       </section>
+      )}
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 

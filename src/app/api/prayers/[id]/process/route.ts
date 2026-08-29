@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { transcribeAudio } from "@/lib/ai/transcribe";
 import { analyzePrayer } from "@/lib/ai/analyze";
+import { synthesizeSpeech, type OpenAiVoice } from "@/lib/ai/tts";
 
 /**
  * Transcribes a prayer's audio and detects its theme/title.
@@ -26,7 +27,9 @@ export async function POST(
   // RLS ensures this only returns a row if the caller owns it.
   const { data: prayer, error: prayerError } = await supabase
     .from("prayers")
-    .select("id, recipient_name, include_recipient_in_title, occasion")
+    .select(
+      "id, recipient_name, include_recipient_in_title, occasion, cartoon_character_id"
+    )
     .eq("id", id)
     .single();
 
@@ -101,6 +104,62 @@ export async function POST(
       .eq("id", id);
 
     if (updateError) throw updateError;
+
+    // Funny Cartoon category (0015_cartoon_characters.sql): the user's own
+    // recording above is still transcribed as normal to get the prayer
+    // text, but the video itself should be read aloud by the chosen
+    // character's AI voice instead of the user's real voice. Synthesize
+    // that now and store it as a separate 'cartoon_audio' media asset
+    // alongside the original raw_audio — the render worker prefers
+    // cartoon_audio over raw_audio whenever cartoon_character_id is set
+    // (see worker/index.js). Best-effort: if this fails (e.g. missing
+    // OPENAI_API_KEY, or someone picked a character before this table was
+    // seeded), the render worker's own error path handles a missing
+    // cartoon_audio asset rather than failing prayer creation here.
+    if (prayer.cartoon_character_id) {
+      try {
+        const { data: character, error: characterError } = await supabase
+          .from("cartoon_characters")
+          .select("openai_voice")
+          .eq("id", prayer.cartoon_character_id)
+          .single();
+        if (characterError || !character) {
+          throw characterError ?? new Error("Cartoon character not found");
+        }
+
+        const cartoonAudioBuffer = await synthesizeSpeech(
+          transcript,
+          character.openai_voice as OpenAiVoice
+        );
+
+        const cartoonAudioPath = `${user.id}/${id}/cartoon.mp3`;
+        const { error: cartoonUploadError } = await supabase.storage
+          .from("prayer-audio")
+          .upload(cartoonAudioPath, cartoonAudioBuffer, {
+            contentType: "audio/mpeg",
+            upsert: true,
+          });
+        if (cartoonUploadError) throw cartoonUploadError;
+
+        const { data: cartoonPublicUrl } = supabase.storage
+          .from("prayer-audio")
+          .getPublicUrl(cartoonAudioPath);
+
+        const { error: cartoonAssetError } = await supabase
+          .from("media_assets")
+          .insert({
+            prayer_id: id,
+            type: "cartoon_audio",
+            storage_url: cartoonPublicUrl.publicUrl,
+          });
+        if (cartoonAssetError) throw cartoonAssetError;
+      } catch (cartoonErr) {
+        console.error(
+          "Cartoon voice synthesis failed (continuing without it):",
+          cartoonErr
+        );
+      }
+    }
 
     // Only queue the render job now that transcript/captions/word_timings/
     // title are all written. This used to be inserted by the create page

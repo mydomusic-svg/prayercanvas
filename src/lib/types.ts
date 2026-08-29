@@ -40,6 +40,12 @@ export interface Prayer {
   photo_asset_url: string | null;
   text_style: TextStyle;
   accent_color: AccentColor | null;
+  // Set when the user picked a Funny Cartoon character instead of a normal
+  // photo/video style (see 0015_cartoon_characters.sql). When set, the
+  // render worker shows just that character's portrait with no on-screen
+  // prayer text, and reads the prayer aloud with an AI TTS voice instead of
+  // the user's own recording.
+  cartoon_character_id: string | null;
   privacy: Privacy;
   created_at: string;
 }
@@ -75,6 +81,22 @@ export interface PhotoStyle {
   id: string;
   name: string;
   image_asset: string;
+  category: string | null;
+  source: string | null;
+  license: string | null;
+}
+
+// Funny Cartoon character library (see supabase/migrations/
+// 0015_cartoon_characters.sql and scripts/seed-cartoon-characters.mjs) — an
+// alternative to a photo/video style + the user's own voice. Picking one
+// sets prayers.cartoon_character_id; openai_voice/pitch_ratio tell the
+// render worker and the TTS step (src/lib/ai/tts.ts) how to voice it.
+export interface CartoonCharacter {
+  id: string;
+  name: string;
+  image_asset: string;
+  openai_voice: string;
+  pitch_ratio: number;
   category: string | null;
   source: string | null;
   license: string | null;

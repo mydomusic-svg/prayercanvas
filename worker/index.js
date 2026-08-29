@@ -222,13 +222,34 @@ async function renderPrayer(job, workDir) {
   const { data: prayer, error: prayerError } = await supabase
     .from("prayers")
     .select(
-      "id, user_id, title, recipient_name, include_recipient_in_title, transcript, captions, word_timings, style_id, music_style_id, photo_asset_url, text_style, accent_color"
+      "id, user_id, title, recipient_name, include_recipient_in_title, transcript, captions, word_timings, style_id, music_style_id, photo_asset_url, text_style, accent_color, cartoon_character_id"
     )
     .eq("id", job.prayer_id)
     .single();
   if (prayerError || !prayer) {
     throw new Error(`Could not load prayer: ${prayerError?.message}`);
   }
+
+  // Funny Cartoon category (0015_cartoon_characters.sql): when set, the
+  // video shows just the character's portrait (no on-screen prayer text —
+  // see the cartoonMode branches in buildFilterComplex/generateThumbnail
+  // below) and is voiced by an AI TTS track instead of the user's own
+  // recording.
+  let cartoonCharacter = null;
+  if (prayer.cartoon_character_id) {
+    const { data: character, error: characterError } = await supabase
+      .from("cartoon_characters")
+      .select("image_asset, pitch_ratio")
+      .eq("id", prayer.cartoon_character_id)
+      .maybeSingle();
+    if (characterError || !character) {
+      throw new Error(
+        `Could not load cartoon character: ${characterError?.message ?? "not found"}`
+      );
+    }
+    cartoonCharacter = character;
+  }
+  const cartoonMode = Boolean(cartoonCharacter);
 
   let styleName = null;
   let visualAssetUrl = null;
@@ -266,16 +287,39 @@ async function renderPrayer(job, workDir) {
   const textStyle = TEXT_STYLES[prayer.text_style] ?? DEFAULT_TEXT_STYLE;
   const accentColor = ACCENT_COLORS[prayer.accent_color] ?? theme.accent;
 
-  const { data: audioAsset, error: audioError } = await supabase
-    .from("media_assets")
-    .select("storage_url")
-    .eq("prayer_id", prayer.id)
-    .eq("type", "raw_audio")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (audioError || !audioAsset) {
-    throw new Error("No raw audio found for this prayer.");
+  // Cartoon prayers are voiced by the AI TTS track (see the process route),
+  // stored as a separate 'cartoon_audio' asset alongside the user's real
+  // raw_audio recording — prefer it here. Fall back to raw_audio if
+  // synthesis failed or hasn't happened yet, same as any other cartoon-mode
+  // best-effort path in this pipeline.
+  let audioAsset = null;
+  let audioAssetError = null;
+  if (cartoonMode) {
+    const { data, error } = await supabase
+      .from("media_assets")
+      .select("storage_url")
+      .eq("prayer_id", prayer.id)
+      .eq("type", "cartoon_audio")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    audioAsset = data;
+    audioAssetError = error;
+  }
+  if (!audioAsset) {
+    const { data, error } = await supabase
+      .from("media_assets")
+      .select("storage_url")
+      .eq("prayer_id", prayer.id)
+      .eq("type", "raw_audio")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    audioAsset = data;
+    audioAssetError = audioAssetError ?? error;
+  }
+  if (!audioAsset) {
+    throw new Error(`No audio found for this prayer: ${audioAssetError?.message ?? ""}`);
   }
 
   await updateJob(job.id, { progress: 15 });
@@ -401,7 +445,22 @@ async function renderPrayer(job, workDir) {
   // scripts/seed-style-assets.mjs), then to the Sprint 3 procedural
   // solid-color background if neither is set.
   let backgroundVideoPath = null;
-  if (prayer.photo_asset_url) {
+  if (cartoonCharacter) {
+    // The character's portrait is the entire visual — same Ken Burns
+    // pan/zoom treatment a user's uploaded photo gets, which also happens
+    // to double as the "simple bounce" motion that keeps a single still
+    // character image from looking totally frozen for the whole video.
+    let photoExt = ".png";
+    try {
+      photoExt = path.extname(new URL(cartoonCharacter.image_asset).pathname) || ".png";
+    } catch {
+      // Malformed URL is unexpected but shouldn't crash the render.
+    }
+    const photoPath = path.join(workDir, `character${photoExt}`);
+    await downloadFile(cartoonCharacter.image_asset, photoPath);
+    backgroundVideoPath = path.join(workDir, "kenburns.mp4");
+    await generateKenBurnsClip(photoPath, backgroundVideoPath);
+  } else if (prayer.photo_asset_url) {
     let photoExt = ".jpg";
     try {
       photoExt = path.extname(new URL(prayer.photo_asset_url).pathname) || ".jpg";
@@ -442,6 +501,8 @@ async function renderPrayer(job, workDir) {
     hasBackgroundVideo: Boolean(backgroundVideoPath),
     hasMusic: Boolean(musicPath),
     logoInputIndex,
+    cartoonMode,
+    pitchRatio: cartoonCharacter?.pitch_ratio ?? 1.0,
   });
 
   await updateJob(job.id, { progress: 45 });
@@ -552,6 +613,7 @@ async function renderPrayer(job, workDir) {
     transcript: prayer.transcript ?? "",
     backgroundVideoPath,
     outputPath: thumbnailPath,
+    cartoonMode,
   });
 
   await updateJob(job.id, { progress: 80 });
@@ -651,7 +713,46 @@ async function generateThumbnail({
   transcript,
   backgroundVideoPath,
   outputPath,
+  cartoonMode = false,
 }) {
+  // Funny Cartoon category: the character's portrait IS the thumbnail — no
+  // title/body text card drawn over it (see buildFilterComplex's matching
+  // cartoonMode branch for why). Keep the background sharp rather than
+  // blurred, since there's no text sitting on top of it here that the blur
+  // would otherwise be helping read.
+  if (cartoonMode) {
+    const filters = [];
+    if (backgroundVideoPath) {
+      filters.push(
+        `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[bg]`
+      );
+    } else {
+      filters.push(`[0:v]copy[bg]`);
+    }
+    filters.push(`[1:v]scale=120:-1,format=rgba,colorchannelmixer=aa=0.8[logo]`);
+    filters.push(`[bg][logo]overlay=W-w-36:H-h-56[s4]`);
+    filters.push(
+      `[s4]drawtext=text='PrayerMessenger':fontfile='${FONT_BOLD}':fontsize=28:fontcolor=white@0.85:` +
+        `bordercolor=black@0.5:borderw=2:x=w-text_w-36:y=h-196[out]`
+    );
+
+    const inputArgs = backgroundVideoPath
+      ? ["-ss", "1.5", "-i", backgroundVideoPath]
+      : ["-f", "lavfi", "-i", `color=c=${theme.bg}:s=1080x1920:d=1:r=1`];
+    inputArgs.push("-i", WATERMARK_PATH);
+
+    await execFileAsync("ffmpeg", [
+      "-y",
+      ...inputArgs,
+      "-filter_complex", filters.join(";"),
+      "-map", "[out]",
+      "-frames:v", "1",
+      "-q:v", "3",
+      outputPath,
+    ]);
+    return;
+  }
+
   const titleLinesPath = path.join(workDir, "thumb-title.txt");
   const wrappedTitle = wrapText(title, textStyle.thumbWrapChars);
   await writeFile(titleLinesPath, wrappedTitle, "utf8");
@@ -835,6 +936,8 @@ function buildFilterComplex({
   hasBackgroundVideo = false,
   hasMusic = false,
   logoInputIndex = null,
+  cartoonMode = false,
+  pitchRatio = 1.0,
 }) {
   const filters = [];
   let currentLabel = "0:v";
@@ -853,6 +956,11 @@ function buildFilterComplex({
 
   let nextLabel = "v0";
 
+  // Funny Cartoon category: no title, no prayer-text card, no captions —
+  // just the character's portrait (already `currentLabel`, from the
+  // hasBackgroundVideo scale/crop above) straight through to the watermark
+  // below. The joke is the character + funny voice, not a text overlay.
+  if (!cartoonMode) {
   // Title uses the user's chosen text-style font + accent color, for the
   // whole video (not just an opening card) — matches the thumbnail so the
   // video and its poster look like a matched set. Dark outline + drop
@@ -935,6 +1043,7 @@ function buildFilterComplex({
       currentLabel = nextLabel;
     });
   }
+  } // end !cartoonMode
 
   // Brand watermark: small, semi-transparent logo mark PLUS the actual
   // words "PrayerMessenger" (not just the icon — recipients who don't
@@ -995,16 +1104,44 @@ function buildFilterComplex({
   //     fuller base level during pauses, instead of sitting at one flat
   //     quiet level for the entire prayer regardless of whether anyone's
   //     talking at that instant.
+  // Funny Cartoon category: pitch/speed-shift the TTS voice via ffmpeg's
+  // classic asetrate trick (resample the audio at a different rate, then
+  // tell ffmpeg to play it back at the original rate — pitch and speed
+  // necessarily move together, which is exactly the chipmunk/slow-giant
+  // effect we want here, not a flaw to work around). Applied before the
+  // compressor/echo below so those still act on the final, already-shifted
+  // voice. 44100 matches the sample rate TTS audio (and everything else in
+  // this pipeline) is produced at.
+  const voiceSource =
+    cartoonMode && pitchRatio !== 1.0
+      ? (() => {
+          filters.push(
+            `[1:a]asetrate=44100*${pitchRatio},aresample=44100[voice_pitched]`
+          );
+          return "voice_pitched";
+        })()
+      : "1:a";
+
   filters.push(
-    `[1:a]acompressor=threshold=0.08:ratio=4:attack=15:release=200:knee=6:makeup=3,` +
+    `[${voiceSource}]acompressor=threshold=0.08:ratio=4:attack=15:release=200:knee=6:makeup=3,` +
       `aecho=in_gain=1:out_gain=1:delays=15|35|55:decays=0.15|0.08|0.04[voice_proc]`
   );
 
   if (hasMusic) {
     filters.push(`[voice_proc]asplit=2[voice][voice_sc]`);
-    filters.push(`[2:a]volume=0.22[music_pre]`);
+    // Base music level raised from 0.22 -> 0.5, and the sidechain duck eased
+    // (ratio 10 -> 4, threshold 0.03 -> 0.06, release 400 -> 600) after users
+    // reported the music being nearly inaudible under the voice. The old
+    // settings meant the music sat at a whisper-quiet base level AND got
+    // crushed almost to silence for the entire time anyone was speaking
+    // (which, for a spoken prayer, is nearly the whole clip) — the two
+    // effects compounded into "no audible music at all". Now the music sits
+    // at a real, audible bed level and only dips moderately while the voice
+    // is speaking, then comes back up between phrases, instead of getting
+    // nearly muted for the whole track.
+    filters.push(`[2:a]volume=0.5[music_pre]`);
     filters.push(
-      `[music_pre][voice_sc]sidechaincompress=threshold=0.03:ratio=10:attack=5:release=400:makeup=1[music]`
+      `[music_pre][voice_sc]sidechaincompress=threshold=0.06:ratio=4:attack=5:release=600:makeup=1[music]`
     );
     // normalize=0: amix defaults to auto-scaling every input down by 1/N,
     // which would quietly halve the voice track on top of the ducking
