@@ -1122,9 +1122,43 @@ function buildFilterComplex({
         })()
       : "1:a";
 
+  // EQ -> compression -> reverb, in that order (the standard vocal chain
+  // order: the compressor should react to the already-EQ'd signal, and the
+  // reverb should sit on top of the compressed result rather than being
+  // squashed by it).
+  //
+  //   - highpass 80 Hz: these are phone recordings from all kinds of rooms.
+  //     Below ~80 Hz there is nothing but handling rumble, desk thumps and
+  //     AC hum, and leaving it in just makes the compressor pump against
+  //     energy nobody can hear on a phone speaker anyway.
+  //   - +2.5 dB @ 200 Hz (Q1.0): "body" — the chest-resonance region that
+  //     makes a voice sound full rather than thin/tinny.
+  //   - -2 dB @ 450 Hz (Q1.2): the "mud"/boxiness band. Cutting a little
+  //     here is what actually makes the 200 Hz body boost read as warmth
+  //     instead of congestion.
+  //   - +3.5 dB @ 3.5 kHz (Q0.9): presence/consonant definition — this is
+  //     the band that carries intelligibility, so it is the one that buys
+  //     clarity against a music bed.
+  //   - +2 dB shelf @ 8 kHz: a little air on top.
+  const voiceEq =
+    `highpass=f=80,` +
+    `equalizer=f=200:width_type=q:w=1.0:g=2.5,` +
+    `equalizer=f=450:width_type=q:w=1.2:g=-2,` +
+    `equalizer=f=3500:width_type=q:w=0.9:g=3.5,` +
+    `treble=f=8000:g=2`;
+
   filters.push(
-    `[${voiceSource}]acompressor=threshold=0.08:ratio=4:attack=15:release=200:knee=6:makeup=3,` +
-      `aecho=in_gain=1:out_gain=1:delays=15|35|55:decays=0.15|0.08|0.04[voice_proc]`
+    `[${voiceSource}]${voiceEq},` +
+      // Slightly harder than before (was threshold 0.08 / ratio 4): a lower
+      // threshold catches more of the quiet passages and the higher ratio
+      // holds the loud ones down, so the delivery sits at a steadier level
+      // over the music instead of drifting.
+      `acompressor=threshold=0.06:ratio=5:attack=12:release=220:knee=6:makeup=3.5,` +
+      // A touch more room than before (was decays 0.15|0.08|0.04, delays
+      // 15|35|55). out_gain MUST stay 1 — see the caution above; the extra
+      // ambience comes from the longer delays and higher decays, never from
+      // out_gain, which would scale the dry voice down with it.
+      `aecho=in_gain=1:out_gain=1:delays=18|40|65:decays=0.20|0.12|0.06[voice_proc]`
   );
 
   if (hasMusic) {

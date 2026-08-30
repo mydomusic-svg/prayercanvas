@@ -31,6 +31,12 @@ create table if not exists public.cartoon_characters (
 
 alter table public.cartoon_characters enable row level security;
 
+-- `create policy` has no `if not exists` form, so a partially-applied run
+-- of this file (table created, then something later in the file failing)
+-- would leave the policy behind and make every retry abort right here with
+-- "policy already exists" — silently skipping everything below it. Dropping
+-- first makes the whole migration safely re-runnable.
+drop policy if exists "Anyone can read cartoon characters" on public.cartoon_characters;
 create policy "Anyone can read cartoon characters"
   on public.cartoon_characters for select
   using (true);
