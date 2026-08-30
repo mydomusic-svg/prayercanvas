@@ -424,7 +424,7 @@ async function renderPrayer(job, workDir) {
   if (prayer.cartoon_character_id) {
     const { data: character, error: characterError } = await supabase
       .from("cartoon_characters")
-      .select("image_asset, pitch_ratio")
+      .select("image_asset, video_asset, pitch_ratio")
       .eq("id", prayer.cartoon_character_id)
       .maybeSingle();
     if (characterError || !character) {
@@ -630,11 +630,19 @@ async function renderPrayer(job, workDir) {
   // scripts/seed-style-assets.mjs), then to the Sprint 3 procedural
   // solid-color background if neither is set.
   let backgroundVideoPath = null;
-  if (cartoonCharacter) {
-    // The character's portrait is the entire visual — same Ken Burns
-    // pan/zoom treatment a user's uploaded photo gets, which also happens
-    // to double as the "simple bounce" motion that keeps a single still
-    // character image from looking totally frozen for the whole video.
+  if (cartoonCharacter?.video_asset) {
+    // The character has a real animation (0017) — use it directly. It is
+    // already 1080x1920 (the seeding script letterboxes the source clip
+    // with a blurred fill, since the raw animations are landscape), so the
+    // scale/crop step downstream is a no-op on it, and renderPrayer's
+    // existing `-stream_loop -1` loops the few seconds of animation to
+    // cover however long the prayer runs.
+    backgroundVideoPath = path.join(workDir, "character.mp4");
+    await downloadFile(cartoonCharacter.video_asset, backgroundVideoPath);
+  } else if (cartoonCharacter) {
+    // No clip for this character yet — fall back to the still portrait with
+    // the same Ken Burns pan/zoom a user's uploaded photo gets, so it isn't
+    // completely frozen on screen for the whole video.
     let photoExt = ".png";
     try {
       photoExt = path.extname(new URL(cartoonCharacter.image_asset).pathname) || ".png";
