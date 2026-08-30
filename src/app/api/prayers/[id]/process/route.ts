@@ -3,6 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { transcribeAudio } from "@/lib/ai/transcribe";
 import { analyzePrayer } from "@/lib/ai/analyze";
 import { synthesizeSpeech, type OpenAiVoice } from "@/lib/ai/tts";
+import { matchCategoriesByKeyword } from "@/lib/ai/keyword-match";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
  * Transcribes a prayer's audio and detects its theme/title.
@@ -28,7 +30,7 @@ export async function POST(
   const { data: prayer, error: prayerError } = await supabase
     .from("prayers")
     .select(
-      "id, recipient_name, include_recipient_in_title, occasion, cartoon_character_id"
+      "id, recipient_name, include_recipient_in_title, occasion, cartoon_character_id, style_id, music_style_id, photo_asset_url"
     )
     .eq("id", id)
     .single();
@@ -86,21 +88,97 @@ export async function POST(
       `Whisper: ${segments.length} segment(s), ${words.length} word(s) for a ${audioBuffer.byteLength}-byte clip.`
     );
 
+    // AUTO-MATCHING MUSIC AND VISUALS
+    //
+    // A prayer's music and background can only be matched to what it's
+    // ABOUT, and what it's about is only known once it has been transcribed
+    // — which is here, not at creation time. So when the user left either
+    // choice on "Auto" (the create page sends null for it), the category is
+    // decided now, before the render job is queued below, and the worker
+    // picks it up like any other choice.
+    //
+    // An explicit choice is never overridden: a null id means Auto, a set
+    // id means the user picked it and we leave it alone.
+    const admin = createAdminClient();
+    const wantsAutoMusic = !prayer.music_style_id;
+    const wantsAutoVisual =
+      !prayer.style_id && !prayer.photo_asset_url && !prayer.cartoon_character_id;
+
+    const [musicRows, styleRows] = await Promise.all([
+      wantsAutoMusic
+        ? admin.from("music_styles").select("id, category")
+        : Promise.resolve({ data: null }),
+      wantsAutoVisual
+        ? admin.from("styles").select("id, category, visual_asset")
+        : Promise.resolve({ data: null }),
+    ]);
+
+    const musicCategories = [
+      ...new Set((musicRows.data ?? []).map((r) => r.category).filter(Boolean)),
+    ] as string[];
+    // Only styles with a real uploaded asset are selectable — the seed data
+    // leaves placeholder filenames on unseeded rows.
+    const usableStyles = (styleRows.data ?? []).filter((r) =>
+      r.visual_asset?.startsWith("http")
+    );
+    const visualCategories = [
+      ...new Set(usableStyles.map((r) => r.category).filter(Boolean)),
+    ] as string[];
+
     // The recipient's name is only allowed to appear in the AI-generated
     // title when the user explicitly opted in at creation time (see the
-    // checkbox in create/page.tsx) — otherwise it's passed to analyzePrayer
-    // purely as unnamed context, same as before, so the title stays generic
-    // enough to reshare with anyone.
-    const { theme, title } = await analyzePrayer({
+    // checkbox in create/page.tsx) — otherwise it's passed purely as unnamed
+    // context, so the title stays generic enough to reshare with anyone.
+    const { theme, title, musicCategory, visualCategory } = await analyzePrayer({
       transcript,
       recipientName: prayer.recipient_name,
       includeRecipientName: prayer.include_recipient_in_title,
       occasion: prayer.occasion,
+      musicCategories,
+      visualCategories,
     });
+
+    // Claude is the primary matcher; keywords only fill in where it declined
+    // or returned something not in the library (see keyword-match.ts).
+    const fallback = matchCategoriesByKeyword(
+      transcript,
+      musicCategories,
+      visualCategories
+    );
+    const chosenMusicCategory = musicCategory ?? fallback.musicCategory;
+    const chosenVisualCategory = visualCategory ?? fallback.visualCategory;
+
+    const pickFrom = <T extends { id: string; category: string | null }>(
+      rows: T[],
+      category: string | null
+    ): string | null => {
+      if (rows.length === 0) return null;
+      const pool = category ? rows.filter((r) => r.category === category) : rows;
+      // Falling back to the whole library rather than returning null keeps a
+      // prayer from ending up with no music at all just because its matched
+      // category happens to be empty.
+      const options = pool.length > 0 ? pool : rows;
+      return options[Math.floor(Math.random() * options.length)].id;
+    };
+
+    const autoMusicStyleId = wantsAutoMusic
+      ? pickFrom(musicRows.data ?? [], chosenMusicCategory)
+      : null;
+    const autoStyleId = wantsAutoVisual
+      ? pickFrom(usableStyles, chosenVisualCategory)
+      : null;
 
     const { error: updateError } = await supabase
       .from("prayers")
-      .update({ transcript, theme, title, captions: segments, word_timings: words })
+      .update({
+        transcript,
+        theme,
+        title,
+        captions: segments,
+        word_timings: words,
+        ...(autoMusicStyleId ? { music_style_id: autoMusicStyleId } : {}),
+        ...(autoStyleId ? { style_id: autoStyleId } : {}),
+      })
       .eq("id", id);
 
     if (updateError) throw updateError;
@@ -177,7 +255,15 @@ export async function POST(
       console.error("Failed to queue render job after processing:", jobError.message);
     }
 
-    return NextResponse.json({ transcript, theme, title, captions: segments, words });
+    return NextResponse.json({
+      transcript,
+      theme,
+      title,
+      captions: segments,
+      words,
+      musicCategory: chosenMusicCategory,
+      visualCategory: chosenVisualCategory,
+    });
   } catch (err) {
     console.error("Prayer processing failed:", err);
     return NextResponse.json(

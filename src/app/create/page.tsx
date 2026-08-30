@@ -166,9 +166,9 @@ export default function CreatePrayerPage() {
       .then(({ data }) => {
         if (data) {
           setStyles(data as Style[]);
-          if (data.length > 0) {
-            setSelectedStyleCategory(data[0].category ?? null);
-          }
+          // Deliberately NOT defaulting to the first category — null means
+          // "Auto", and the prayer's own words choose the background once it
+          // has been transcribed (see the process route).
         }
       });
     // Music is chosen independently of the visual style — see
@@ -181,7 +181,7 @@ export default function CreatePrayerPage() {
       .then(({ data }) => {
         if (data) {
           setMusicStyles(data as MusicStyle[]);
-          if (data.length > 0) setMusicCategory(data[0].category ?? null);
+          // Same as the video style above: null means Auto.
         }
       });
     supabase
@@ -272,7 +272,7 @@ export default function CreatePrayerPage() {
     setPhotoPreviewUrl(null);
   }
 
-  function selectStyleCategory(category: string) {
+  function selectStyleCategory(category: string | null) {
     setSelectedStyleCategory(category);
     setPhotoFile(null);
     setPhotoPreviewUrl(null);
@@ -337,8 +337,15 @@ export default function CreatePrayerPage() {
       // the more specific explicit choice defensively here too.
       const usingCartoon = Boolean(cartoonCharacterId);
       const usingPhoto = !usingCartoon && Boolean(photoFile || libraryPhotoUrl);
+      // A null category means "Auto" — leave style_id/music_style_id unset so
+      // the process route can choose them from the transcript once the prayer
+      // has actually been transcribed. Passing null into pickRandom* here
+      // would instead draw from the WHOLE library, which looks like a choice
+      // to everything downstream and would silently defeat auto-matching.
       const styleId =
-        usingCartoon || usingPhoto ? null : pickRandomStyleId(selectedStyleCategory);
+        usingCartoon || usingPhoto || selectedStyleCategory === null
+          ? null
+          : pickRandomStyleId(selectedStyleCategory);
       const { data: prayer, error: prayerError } = await supabase
         .from("prayers")
         .insert({
@@ -348,7 +355,8 @@ export default function CreatePrayerPage() {
           occasion: occasion || null,
           style_id: styleId,
           photo_asset_url: usingCartoon ? null : photoFile ? null : libraryPhotoUrl,
-          music_style_id: pickRandomMusicStyleId(musicCategory),
+          music_style_id:
+            musicCategory === null ? null : pickRandomMusicStyleId(musicCategory),
           text_style: textStyle,
           accent_color: accentColor,
           cartoon_character_id: cartoonCharacterId,
@@ -655,6 +663,17 @@ export default function CreatePrayerPage() {
                   )}
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => selectStyleCategory(null)}
+                className={`rounded-lg border px-4 py-3 text-sm transition ${
+                  !photoFile && !libraryPhotoUrl && selectedStyleCategory === null
+                    ? "border-sage-600 bg-sage-600 text-white"
+                    : "border-dashed border-sage-400 text-sage-600 hover:bg-sage-50"
+                }`}
+              >
+                ✨ Match my prayer
+              </button>
               {categories.map((cat) => (
                 <button
                   key={cat}
@@ -760,6 +779,17 @@ export default function CreatePrayerPage() {
               (pickRandomMusicStyleId), which also means two prayers made with
               the same category don't come out with identical music. */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <button
+              type="button"
+              onClick={() => setMusicCategory(null)}
+              className={`rounded-lg border px-4 py-3 text-sm transition ${
+                musicCategory === null
+                  ? "border-sage-600 bg-sage-600 text-white"
+                  : "border-dashed border-sage-400 text-sage-600 hover:bg-sage-50"
+              }`}
+            >
+              ✨ Match my prayer
+            </button>
             {categories.map((cat) => (
               <button
                 key={cat}
