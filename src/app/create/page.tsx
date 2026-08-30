@@ -114,9 +114,9 @@ export default function CreatePrayerPage() {
     string | null
   >(null);
   const [musicStyles, setMusicStyles] = useState<MusicStyle[]>([]);
-  const [selectedMusicStyleId, setSelectedMusicStyleId] = useState<string | null>(
-    null
-  );
+  // Music, like the video style, is chosen by CATEGORY only — the specific
+  // track is drawn at random at submit time (pickRandomMusicStyleId), so
+  // there is no individual track id for the UI to hold onto.
   const [musicCategory, setMusicCategory] = useState<string | null>(null);
   const [textStyle, setTextStyle] = useState<TextStyle>("calligraphy");
   const [accentColor, setAccentColor] = useState<AccentColor>("gold");
@@ -181,10 +181,7 @@ export default function CreatePrayerPage() {
       .then(({ data }) => {
         if (data) {
           setMusicStyles(data as MusicStyle[]);
-          if (data.length > 0) {
-            setSelectedMusicStyleId(data[0].id);
-            setMusicCategory(data[0].category ?? null);
-          }
+          if (data.length > 0) setMusicCategory(data[0].category ?? null);
         }
       });
     supabase
@@ -287,6 +284,19 @@ export default function CreatePrayerPage() {
   // The actual clip is picked randomly from that category right at submit
   // time, so re-generating (or just creating another prayer with the same
   // category) doesn't always use the exact same background.
+  // Same idea as pickRandomStyleId below, for music: the picker only offers
+  // categories, so the actual track is chosen here at the last moment. Two
+  // prayers made with the same category therefore get different music rather
+  // than always the same first track.
+  function pickRandomMusicStyleId(category: string | null): string | null {
+    if (musicStyles.length === 0) return null;
+    const pool = category
+      ? musicStyles.filter((m) => (m.category || "Other") === category)
+      : musicStyles;
+    const options = pool.length > 0 ? pool : musicStyles;
+    return options[Math.floor(Math.random() * options.length)].id;
+  }
+
   function pickRandomStyleId(category: string | null): string | null {
     if (styles.length === 0) return null;
     const pool = category
@@ -338,7 +348,7 @@ export default function CreatePrayerPage() {
           occasion: occasion || null,
           style_id: styleId,
           photo_asset_url: usingCartoon ? null : photoFile ? null : libraryPhotoUrl,
-          music_style_id: selectedMusicStyleId,
+          music_style_id: pickRandomMusicStyleId(musicCategory),
           text_style: textStyle,
           accent_color: accentColor,
           cartoon_character_id: cartoonCharacterId,
@@ -738,46 +748,49 @@ export default function CreatePrayerPage() {
         const categories = Array.from(
           new Set(musicStyles.map((m) => m.category || "Other"))
         );
-        const visibleMusicStyles = musicCategory
-          ? musicStyles.filter((m) => (m.category || "Other") === musicCategory)
-          : musicStyles;
         return (
       <section className="flex flex-col gap-3">
           <p className="text-sm font-medium">Choose a music style</p>
-          {categories.length > 1 && (
-            <div className="flex flex-wrap gap-2">
-              {categories.map((cat) => (
+          {/* Category tiles only — no individual track list. This mirrors the
+              video style picker above: with 60+ tracks in the library, listing
+              every one made the page enormous and the relationship between the
+              category chips and the track grid below them read as two separate
+              controls rather than a filter. The specific track is drawn at
+              random from the chosen category at submit time
+              (pickRandomMusicStyleId), which also means two prayers made with
+              the same category don't come out with identical music. */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {categories.map((cat) => {
+              const count = musicStyles.filter(
+                (m) => (m.category || "Other") === cat
+              ).length;
+              return (
                 <button
                   key={cat}
                   type="button"
                   onClick={() => setMusicCategory(cat)}
-                  className={`rounded-full border px-3 py-1 text-xs transition ${
+                  className={`rounded-lg border px-4 py-3 text-sm transition ${
                     musicCategory === cat
                       ? "border-sage-600 bg-sage-600 text-white"
-                      : "border-sage-300 text-sage-600 hover:bg-sage-50"
+                      : "border-sage-300 hover:bg-sage-50"
                   }`}
                 >
                   {cat}
+                  <span
+                    className={`ml-1.5 text-xs ${
+                      musicCategory === cat ? "text-sage-200" : "text-sage-400"
+                    }`}
+                  >
+                    {count}
+                  </span>
                 </button>
-              ))}
-            </div>
-          )}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {visibleMusicStyles.map((musicStyle) => (
-              <button
-                key={musicStyle.id}
-                type="button"
-                onClick={() => setSelectedMusicStyleId(musicStyle.id)}
-                className={`rounded-lg border px-4 py-3 text-sm transition ${
-                  selectedMusicStyleId === musicStyle.id
-                    ? "border-sage-600 bg-sage-600 text-white"
-                    : "border-sage-300 hover:bg-sage-50"
-                }`}
-              >
-                {musicStyle.name}
-              </button>
-            ))}
+              );
+            })}
           </div>
+          <p className="text-xs text-sage-400">
+            A track from this category is picked for you, so each prayer gets
+            a fresh one.
+          </p>
       </section>
         );
       })()}
