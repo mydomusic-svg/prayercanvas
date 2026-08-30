@@ -231,6 +231,35 @@ export async function POST(
             storage_url: cartoonPublicUrl.publicUrl,
           });
         if (cartoonAssetError) throw cartoonAssetError;
+
+        // RE-TIME THE CAPTIONS TO THE CARTOON VOICE.
+        //
+        // The captions burned along the bottom of the video are driven by
+        // word_timings, which up to this point describe the USER's recording.
+        // A cartoon prayer doesn't play that recording — it plays the TTS
+        // above, which speaks the same words at a completely different pace.
+        // Reusing the original timings would drift further out of sync with
+        // every sentence.
+        //
+        // So transcribe the synthesized audio and overwrite the timings with
+        // ones that actually match what will be heard. The transcript itself
+        // is deliberately NOT overwritten: Whisper on the user's own voice is
+        // the authoritative record of what they said, and re-transcribing
+        // synthetic speech could quietly corrupt it.
+        const cartoonTiming = await transcribeAudio(
+          cartoonAudioBuffer,
+          "cartoon.mp3"
+        );
+        if (cartoonTiming.words.length > 0 || cartoonTiming.segments.length > 0) {
+          const { error: timingError } = await supabase
+            .from("prayers")
+            .update({
+              captions: cartoonTiming.segments,
+              word_timings: cartoonTiming.words,
+            })
+            .eq("id", id);
+          if (timingError) throw timingError;
+        }
       } catch (cartoonErr) {
         console.error(
           "Cartoon voice synthesis failed (continuing without it):",

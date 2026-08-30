@@ -1227,6 +1227,11 @@ function buildFilterComplex({
     currentLabel = nextLabel;
   }
 
+  } // end !cartoonMode — title and prayer-text card are suppressed above,
+    // but the captions below are NOT: a cartoon video still needs the words
+    // on screen, just along the bottom rather than as a card over the middle
+    // of the character.
+
   // Prefer word-level highlighting (Sprint 3.6): one word on screen at a
   // time, in a gold highlight box, exactly timed to Whisper's per-word
   // timestamps — the caption tracks the speech instead of showing a whole
@@ -1261,7 +1266,6 @@ function buildFilterComplex({
       currentLabel = nextLabel;
     });
   }
-  } // end !cartoonMode
 
   // Brand watermark: small, semi-transparent logo mark PLUS the actual
   // words "PrayerMessenger" (not just the icon — recipients who don't
