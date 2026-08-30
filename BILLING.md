@@ -9,7 +9,7 @@ is only for when you're ready to start charging.
 ## What's already built
 
 - **Pricing model:** Free (2 videos/month), PrayerMessenger Plus
-  ($6.99/mo or $49.99/yr, unlimited), and pay-per-send ($1.99/video) for
+  ($4.99/mo or $39.99/yr, unlimited), and pay-per-send ($1.49/video) for
   free-tier users who don't want to subscribe.
 - **`/pricing` page** — shows all three tiers. Buttons are disabled
   ("Coming soon") while billing is off.
@@ -34,9 +34,9 @@ is only for when you're ready to start charging.
 2. **Create three Prices in Stripe** (Dashboard → Product catalog, or ask
    me to do it via the Stripe MCP connector once it's connected in this
    chat):
-   - "PrayerMessenger Plus" — recurring, $6.99/month
-   - "PrayerMessenger Plus" — recurring, $49.99/year
-   - "Prayer video" — one-time, $1.99
+   - "PrayerMessenger Plus" — recurring, $4.99/month
+   - "PrayerMessenger Plus" — recurring, $39.99/year
+   - "Prayer video" — one-time, $1.49
 
    Copy each Price ID (starts with `price_...`).
 

@@ -13,13 +13,15 @@
 // a 4x upscale AND throwing away ~68% of the frame width — enough to cut
 // the subject clean out of shot.
 //
-// So each clip is letterboxed here instead: the animation is fitted to the
-// full 1080 width and stays completely visible, and the space above and
-// below is filled with a blurred, slightly darkened, enlarged copy of the
-// same frame. Nothing is cropped, the upscale drops to a gentle 1.26x, and
-// the blurred bands read as an extension of the shot rather than dead
-// space. The result is already 1080x1920, so the worker's scale/crop step
-// becomes a harmless no-op.
+// So each clip is pre-converted to 1080x1920 here, using ONE OF TWO
+// treatments depending on what the clip is — see VERTICAL_LETTERBOX and
+// VERTICAL_FILL below for the reasoning:
+//
+//   Background styles -> blurred letterbox (keeps the whole wide shot)
+//   Character clips   -> fill the frame (keeps the character big)
+//
+// Either way the output is already 1080x1920, so the worker's own
+// scale/crop step becomes a harmless no-op.
 //
 // Audio is stripped (the render pipeline never reads a background clip's
 // audio) and the bitrate is capped, which also happens to shrink these by
@@ -76,14 +78,32 @@ const STYLE_CLIPS = {
   "Rain clouds cartoon kids.mov": ["Children under the rain clouds", "Family"],
 };
 
-// See the header comment. gblur on the background copy, eq to darken it a
-// little so the sharp centre band is clearly the subject, then the fitted
-// copy overlaid dead centre.
-const VERTICAL_FILL =
+// BACKGROUND STYLES — blurred letterbox. These are wide establishing shots
+// (angels over a street, a family walking, a garden) where cropping to
+// vertical would cut the subject out of frame entirely, so the whole shot
+// is kept visible and the space above/below is filled with a blurred,
+// slightly darkened copy. Prayer text is drawn over these, and the blurred
+// bands happen to be an excellent surface to read text against.
+const VERTICAL_LETTERBOX =
   "split=2[bg][fg];" +
   "[bg]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=28,eq=brightness=-0.06[bgb];" +
   "[fg]scale=1080:-2[fgs];" +
   "[bgb][fgs]overlay=(W-w)/2:(H-h)/2";
+
+// CHARACTER CLIPS — fill the frame instead. These are tight, centred
+// character portraits, and letterboxing one leaves the character occupying
+// only 32% of the screen surrounded by 68% blurred smear of its own face —
+// which looked exactly as bad as it sounds in a real render. Filling crops
+// only empty background at the sides and makes the character large and
+// present, which is the entire point of the cartoon mode.
+//
+// This does mean a 4x upscale from the 480p source. That would wreck a
+// photograph, but these are flat cartoon renders — smooth gradients and
+// bold shapes, almost no fine detail to lose — so they take it well. The
+// unsharp pass recovers the edge definition the upscale softens.
+const VERTICAL_FILL =
+  "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920," +
+  "unsharp=5:5:0.8:5:5:0.0";
 
 function slug(name) {
   return name
@@ -93,10 +113,10 @@ function slug(name) {
     .slice(0, 60);
 }
 
-async function encode(input, output) {
+async function encode(input, output, filter) {
   await execFileAsync("ffmpeg", [
     "-y", "-i", input,
-    "-vf", VERTICAL_FILL,
+    "-vf", filter,
     "-c:v", "libx264",
     "-preset", "slow",
     "-crf", "30",
@@ -145,7 +165,8 @@ async function main() {
 
   console.log(
     `${DRY_RUN ? "DRY RUN — nothing will be written\n" : ""}` +
-      `Letterboxing to 1080x1920 with blurred fill, audio stripped.\n`
+      `Converting to 1080x1920, audio stripped.\n` +
+      `  characters -> fill the frame   styles -> blurred letterbox\n`
   );
 
   try {
@@ -154,7 +175,7 @@ async function main() {
       const out = path.join(workDir, `${slug(characterName)}.mp4`);
       try {
         const srcSize = (await stat(src)).size;
-        await encode(src, out);
+        await encode(src, out, VERTICAL_FILL);
         const outSize = (await stat(out)).size;
         before += srcSize; after += outSize;
 
@@ -164,7 +185,7 @@ async function main() {
         );
 
         if (!DRY_RUN) {
-          const url = await upload(`characters/${slug(characterName)}.mp4`, await readFile(out));
+          const url = await upload(`characters/${slug(characterName)}-anim.mp4`, await readFile(out));
           const { error } = await supabase
             .from("cartoon_characters")
             .update({ video_asset: url })
@@ -188,7 +209,7 @@ async function main() {
           continue;
         }
         const srcSize = (await stat(src)).size;
-        await encode(src, out);
+        await encode(src, out, VERTICAL_LETTERBOX);
         const outSize = (await stat(out)).size;
         before += srcSize; after += outSize;
 

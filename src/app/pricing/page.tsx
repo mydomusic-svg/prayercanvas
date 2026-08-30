@@ -72,7 +72,8 @@ export default async function PricingPage() {
             </h2>
             <p className="text-3xl font-bold text-sage-900">$0</p>
             <p className="text-sm text-sage-600">
-              2 prayer videos every month, on us.
+              2 prayer videos every month, on us. Videos stay available for 24
+              hours and you can download 3 a day — so save the ones you love.
             </p>
             <p className="mt-auto text-xs text-sage-400">Always free</p>
           </div>
@@ -85,10 +86,11 @@ export default async function PricingPage() {
               PrayerMessenger Plus
             </h2>
             <p className="text-3xl font-bold text-sage-900">
-              $6.99<span className="text-base font-normal text-sage-500">/mo</span>
+              $4.99<span className="text-base font-normal text-sage-500">/mo</span>
             </p>
             <p className="text-sm text-sage-600">
-              Unlimited prayer videos, every style, no limits.
+              Unlimited prayer videos and unlimited downloads — and your
+              videos are kept for good, never expiring.
             </p>
             <div className="mt-auto flex flex-col gap-2">
               <CheckoutButton
@@ -98,7 +100,7 @@ export default async function PricingPage() {
               />
               <CheckoutButton
                 plan="yearly"
-                label="Subscribe yearly — $49.99/yr"
+                label="Subscribe yearly — $39.99/yr (save 33%)"
                 billingEnabled={billingEnabled}
                 className="!bg-transparent !text-sage-600 !border !border-sage-300 hover:!bg-sage-50"
               />
@@ -110,7 +112,7 @@ export default async function PricingPage() {
               Pay as you go
             </h2>
             <p className="text-3xl font-bold text-sage-900">
-              $1.99<span className="text-base font-normal text-sage-500">/video</span>
+              $1.49<span className="text-base font-normal text-sage-500">/video</span>
             </p>
             <p className="text-sm text-sage-600">
               Past your 2 free videos this month? Send one more without
