@@ -78,32 +78,61 @@ const STYLE_CLIPS = {
   "Rain clouds cartoon kids.mov": ["Children under the rain clouds", "Family"],
 };
 
-// BACKGROUND STYLES — blurred letterbox. These are wide establishing shots
-// (angels over a street, a family walking, a garden) where cropping to
-// vertical would cut the subject out of frame entirely, so the whole shot
-// is kept visible and the space above/below is filled with a blurred,
-// slightly darkened copy. Prayer text is drawn over these, and the blurred
-// bands happen to be an excellent surface to read text against.
+// Every source clip in the folder is 854x480 — 16:9 landscape — and the
+// render is 1080x1920 vertical. There is no way to put a 16:9 frame into a
+// 9:16 one without either shrinking it or cutting it, so both treatments
+// below do the same two things: place a FITTED copy of the clip over a
+// blurred, zoomed copy of itself, and trim some of the side margin first so
+// the fitted copy lands bigger than a plain letterbox would.
+//
+// The trim is what the earlier passes got wrong in both directions. Plain
+// letterbox left the subject at ~31% of the frame. Scale-to-fill went the
+// other way and kept only the middle 31% of the WIDTH — measured on the
+// actual clips, that cut the bear's ears off and sliced the squirrel's tail
+// away, leaving an extreme close-up of a face. Trimming a fixed slice off
+// each side and then fitting is the middle path: bigger subject, nothing
+// lost.
+
+// BACKGROUND STYLES — wide establishing shots (angels over a street, a
+// family walking, a garden) where the subject can sit anywhere in frame, so
+// only 11% comes off each side. The blurred bands that remain are not waste:
+// prayer text is drawn at y=140 and y=h-380, which lands them squarely on
+// those bands, and blurred low-contrast video is the best surface to read
+// text against that this pipeline has.
 const VERTICAL_LETTERBOX =
   "split=2[bg][fg];" +
-  "[bg]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=28,eq=brightness=-0.06[bgb];" +
-  "[fg]scale=1080:-2[fgs];" +
+  "[bg]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920," +
+  "gblur=sigma=28,eq=brightness=-0.06[bgb];" +
+  "[fg]crop=trunc(iw*0.78/2)*2:ih:trunc(iw*0.11/2)*2:0,scale=1080:-2[fgs];" +
   "[bgb][fgs]overlay=(W-w)/2:(H-h)/2";
 
-// CHARACTER CLIPS — fill the frame instead. These are tight, centred
-// character portraits, and letterboxing one leaves the character occupying
-// only 32% of the screen surrounded by 68% blurred smear of its own face —
-// which looked exactly as bad as it sounds in a real render. Filling crops
-// only empty background at the sides and makes the character large and
-// present, which is the entire point of the cartoon mode.
+// CHARACTER CLIPS — a single centred character on a plain or softly
+// gradient background. Measured subject extents across the four clips run
+// from 30% to 88% of the width, so 10% off each side is the most that can
+// come off without clipping the squirrel's tail; that is exactly what is
+// trimmed here.
 //
-// This does mean a 4x upscale from the 480p source. That would wreck a
-// photograph, but these are flat cartoon renders — smooth gradients and
-// bold shapes, almost no fine detail to lose — so they take it well. The
-// unsharp pass recovers the edge definition the upscale softens.
+// Two details that matter:
+//
+//   - sigma=60 (vs 28 above). These backgrounds are near-flat, so blurring
+//     that hard collapses the zoomed copy to essentially the clip's own
+//     background colour. The bands stop reading as a smeared duplicate of
+//     the character's face and start reading as the backdrop simply
+//     continuing past the edges of the shot.
+//   - the -150 vertical offset lifts the character above centre, which
+//     clears the caption band at y=h-380. Cartoon videos carry captions
+//     now, and a character sitting dead centre collides with them.
+//
+// unsharp recovers the edge definition lost to the ~2.5x upscale from 480p.
+// That would wreck a photograph; these are flat cartoon renders with almost
+// no fine detail to lose, so they take it well.
 const VERTICAL_FILL =
-  "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920," +
-  "unsharp=5:5:0.8:5:5:0.0";
+  "split=2[bg][fg];" +
+  "[bg]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920," +
+  "gblur=sigma=60,eq=brightness=-0.03[bgb];" +
+  "[fg]crop=trunc(iw*0.80/2)*2:ih:trunc(iw*0.10/2)*2:0,scale=1080:-2," +
+  "unsharp=5:5:0.8:5:5:0.0[fgs];" +
+  "[bgb][fgs]overlay=(W-w)/2:(H-h)/2-150";
 
 function slug(name) {
   return name
@@ -116,7 +145,9 @@ function slug(name) {
 async function encode(input, output, filter) {
   await execFileAsync("ffmpeg", [
     "-y", "-i", input,
-    "-vf", filter,
+    // Both treatments use split/overlay with labelled pads, which -vf
+    // cannot express — it only takes a single linear chain.
+    "-filter_complex", filter,
     "-c:v", "libx264",
     "-preset", "slow",
     "-crf", "30",
@@ -185,7 +216,7 @@ async function main() {
         );
 
         if (!DRY_RUN) {
-          const url = await upload(`characters/${slug(characterName)}-anim.mp4`, await readFile(out));
+          const url = await upload(`characters/${slug(characterName)}-anim2.mp4`, await readFile(out));
           const { error } = await supabase
             .from("cartoon_characters")
             .update({ video_asset: url })
@@ -204,10 +235,10 @@ async function main() {
       const src = path.join(folder, file);
       const out = path.join(workDir, `${slug(name)}.mp4`);
       try {
-        if (existingStyleNames.has(name)) {
-          console.log(`SKIP (already in library)  ${name}`);
-          continue;
-        }
+        // Re-running this script is now how a reframed clip gets published,
+        // so an existing style is UPDATED in place rather than skipped —
+        // that keeps its id, and any prayer already pointing at it.
+        const alreadyPresent = existingStyleNames.has(name);
         const srcSize = (await stat(src)).size;
         await encode(src, out, VERTICAL_LETTERBOX);
         const outSize = (await stat(out)).size;
@@ -219,7 +250,17 @@ async function main() {
         );
 
         if (!DRY_RUN) {
-          const url = await upload(`videos/anim-${slug(name)}.mp4`, await readFile(out));
+          const url = await upload(`videos/anim2-${slug(name)}.mp4`, await readFile(out));
+          if (alreadyPresent) {
+            const { error: updateError } = await supabase
+              .from("styles")
+              .update({ visual_asset: url })
+              .eq("name", name);
+            if (updateError) throw new Error(`update: ${updateError.message}`);
+            styles++;
+            await rm(out, { force: true });
+            continue;
+          }
           const { error } = await supabase.from("styles").insert({
             name,
             visual_asset: url,

@@ -39,15 +39,18 @@ const BUCKET = "style-assets";
 // pitch_ratio drives ffmpeg's asetrate trick worker-side (pitch and speed
 // move together) — see buildFilterComplex in worker/index.js.
 //
-// All set to 1.0 = NO shift. The first pass used values from 0.75 to 1.45 to
-// make each character sound distinct, but in a real render the faster ones
-// sped the speech up so much the prayer became hard to follow — and a prayer
-// you can't follow is a broken prayer, however funny the voice. The
-// character now comes from its own OpenAI voice and its animation instead.
-// The column is kept (rather than dropped) so a gentler shift can be dialled
-// back in per character later without a migration — the worker skips the
-// filter entirely at exactly 1.0. openai_voice is one of OpenAI's
-// tts-1 stock voices (alloy/echo/fable/onyx/nova/shimmer).
+// pitch_ratio stays at 1.0 for every character and voice_effect now does the
+// work instead. The first pass used raw pitch_ratio values from 0.75 to 1.45,
+// which sped the speech up so much the prayer became hard to follow — asetrate
+// moves pitch and speed together. The worker now compensates the speed back
+// with atempo (see VOICE_EFFECTS and buildFilterComplex in worker/index.js),
+// so a named effect shifts pitch and adds its own EQ/vibrato character while
+// the words stay at a normal speaking pace. pitch_ratio is still honoured when
+// voice_effect is null, so a one-off tweak needs no migration.
+//
+// openai_voice is one of OpenAI's tts-1 stock voices
+// (alloy/echo/fable/onyx/nova/shimmer) and is the base the effect sits on:
+// the voice picks the speaker, the effect picks the creature.
 const CHARACTERS = [
   {
     name: "Chuckles the Squirrel",
@@ -55,6 +58,7 @@ const CHARACTERS = [
       "A cute original cartoon mascot character: a round, cheerful cartoon squirrel wearing a tiny acorn-shaped hat, big expressive eyes, mid-laugh with a huge grin, simple flat vector illustration style, solid pastel green background, centered portrait, no text, no logos.",
     openai_voice: "shimmer",
     pitch_ratio: 1.0,
+    voice_effect: "chipmunk",
   },
   {
     name: "Boomer the Bear",
@@ -62,6 +66,7 @@ const CHARACTERS = [
       "A cute original cartoon mascot character: a big friendly cartoon bear with a goofy lopsided grin and a plaid bowtie, simple flat vector illustration style, solid warm brown background, centered portrait, no text, no logos.",
     openai_voice: "onyx",
     pitch_ratio: 1.0,
+    voice_effect: "bear",
   },
   {
     name: "Sparkle the Unicorn",
@@ -69,6 +74,7 @@ const CHARACTERS = [
       "A cute original cartoon mascot character: a bubbly pastel cartoon unicorn with a rainbow mane and a silly cross-eyed grin, simple flat vector illustration style, solid lavender background, centered portrait, no text, no logos.",
     openai_voice: "nova",
     pitch_ratio: 1.0,
+    voice_effect: "sparkle",
   },
   {
     name: "Grumbles the Cloud",
@@ -76,6 +82,7 @@ const CHARACTERS = [
       "A cute original cartoon mascot character: a small round grumpy-but-lovable cartoon rain cloud with a deadpan flat expression and one raised eyebrow, simple flat vector illustration style, solid sky-blue background, centered portrait, no text, no logos.",
     openai_voice: "echo",
     pitch_ratio: 1.0,
+    voice_effect: "grumpy",
   },
   {
     name: "Ziggy the Alien",
@@ -83,6 +90,7 @@ const CHARACTERS = [
       "A cute original cartoon mascot character: a small wacky green cartoon alien with three eyes and antenna, wide silly open-mouthed smile, simple flat vector illustration style, solid deep purple background, centered portrait, no text, no logos.",
     openai_voice: "fable",
     pitch_ratio: 1.0,
+    voice_effect: "alien",
   },
   {
     name: "Puddles the Duck",
@@ -90,6 +98,7 @@ const CHARACTERS = [
       "A cute original cartoon mascot character: a small clumsy cartoon duck wearing yellow rain boots, mid-quack with a silly surprised expression, simple flat vector illustration style, solid teal background, centered portrait, no text, no logos.",
     openai_voice: "alloy",
     pitch_ratio: 1.0,
+    voice_effect: "duck",
   },
 ];
 
@@ -147,6 +156,7 @@ async function main() {
         image_asset: publicUrl,
         openai_voice: character.openai_voice,
         pitch_ratio: character.pitch_ratio,
+        voice_effect: character.voice_effect,
         category: "Funny",
         source: "AI-generated (OpenAI gpt-image-1)",
         license: null,

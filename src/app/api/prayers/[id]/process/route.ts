@@ -161,8 +161,75 @@ export async function POST(
       return options[Math.floor(Math.random() * options.length)].id;
     };
 
+    // MUSIC ROTATION.
+    //
+    // A pure random pick out of a category is not the same thing as variety.
+    // With the handful of tracks a narrow category holds, random repeats
+    // constantly — and someone who makes three prayers in a row and hears the
+    // same bed each time reads that as the app being broken, not as chance.
+    //
+    // So the picker cycles instead. Two rules, in order:
+    //
+    //   1. COOLDOWN. Any track this member has had in the last 15 minutes is
+    //      off the table entirely. This is the hard guarantee.
+    //   2. LEAST RECENTLY USED. Of what is left, anything they have never
+    //      heard comes first (random among those, so two people with the same
+    //      history don't walk the library in lockstep). Only once the whole
+    //      category has been used does it come back around to the track they
+    //      heard longest ago.
+    //
+    // Together those mean a member works through a category before repeating
+    // any of it, and never hears the same track twice inside a quarter hour.
+    //
+    // History comes from the prayers table itself rather than a new tracking
+    // table — every prayer already records its user, its music and its
+    // creation time, which is exactly the three things needed here.
+    const MUSIC_COOLDOWN_MS = 15 * 60 * 1000;
+    const { data: recentPrayers } = wantsAutoMusic
+      ? await admin
+          .from("prayers")
+          .select("music_style_id, created_at")
+          .eq("user_id", user.id)
+          .not("music_style_id", "is", null)
+          .order("created_at", { ascending: false })
+          .limit(200)
+      : { data: null };
+
+    // Most recent use per track. The query is already newest-first, so the
+    // first time a track is seen is its latest use.
+    const lastUsedAt = new Map<string, number>();
+    for (const row of recentPrayers ?? []) {
+      const id = row.music_style_id as string | null;
+      if (!id || lastUsedAt.has(id)) continue;
+      lastUsedAt.set(id, new Date(row.created_at as string).getTime());
+    }
+
+    const pickMusic = <T extends { id: string; category: string | null }>(
+      rows: T[],
+      category: string | null
+    ): string | null => {
+      if (rows.length === 0) return null;
+      const pool = category ? rows.filter((r) => r.category === category) : rows;
+      const options = pool.length > 0 ? pool : rows;
+
+      const cutoff = Date.now() - MUSIC_COOLDOWN_MS;
+      let eligible = options.filter((r) => (lastUsedAt.get(r.id) ?? 0) < cutoff);
+      // If the cooldown would rule out everything — a category smaller than
+      // the number of prayers someone just made — silence is far worse than a
+      // repeat, so fall back to the full set rather than returning null.
+      if (eligible.length === 0) eligible = options;
+
+      const unheard = eligible.filter((r) => !lastUsedAt.has(r.id));
+      if (unheard.length > 0) {
+        return unheard[Math.floor(Math.random() * unheard.length)].id;
+      }
+      return eligible.reduce((oldest, r) =>
+        (lastUsedAt.get(r.id) ?? 0) < (lastUsedAt.get(oldest.id) ?? 0) ? r : oldest
+      ).id;
+    };
+
     const autoMusicStyleId = wantsAutoMusic
-      ? pickFrom(musicRows.data ?? [], chosenMusicCategory)
+      ? pickMusic(musicRows.data ?? [], chosenMusicCategory)
       : null;
     const autoStyleId = wantsAutoVisual
       ? pickFrom(usableStyles, chosenVisualCategory)

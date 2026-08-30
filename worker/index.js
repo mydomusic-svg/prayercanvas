@@ -424,7 +424,7 @@ async function renderPrayer(job, workDir) {
   if (prayer.cartoon_character_id) {
     const { data: character, error: characterError } = await supabase
       .from("cartoon_characters")
-      .select("image_asset, video_asset, pitch_ratio")
+      .select("image_asset, video_asset, pitch_ratio, voice_effect")
       .eq("id", prayer.cartoon_character_id)
       .maybeSingle();
     if (characterError || !character) {
@@ -696,6 +696,7 @@ async function renderPrayer(job, workDir) {
     logoInputIndex,
     cartoonMode,
     pitchRatio: cartoonCharacter?.pitch_ratio ?? 1.0,
+    voiceEffect: cartoonCharacter?.voice_effect ?? null,
   });
 
   await updateJob(job.id, { progress: 45 });
@@ -1136,6 +1137,62 @@ function truncateForThumbnail(text, maxChars) {
   return `${cut.slice(0, lastSpace > 0 ? lastSpace : maxChars)}…`;
 }
 
+// Voice presets for the Funny Cartoon category, keyed by the
+// cartoon_characters.voice_effect column (0018_cartoon_voice_effect.sql).
+//
+// `pitch` is the asetrate ratio: above 1 raises the voice, below 1 lowers
+// it. Speed is corrected back to normal separately — see the long comment
+// in buildFilterComplex. `chain` is the extra ffmpeg audio filter chain
+// that gives the voice its character beyond raw pitch.
+//
+// Ranges were chosen by ear against intelligibility: past about 1.5 up or
+// 0.72 down, consonants start dissolving and the prayer stops being
+// followable, which defeats the point.
+const VOICE_EFFECTS = {
+  // Nasal and honking: scoop the chest register out, push the 1.5-2.5kHz
+  // "quack" band hard, and wobble it.
+  duck: {
+    pitch: 1.42,
+    chain:
+      "equalizer=f=400:width_type=q:w=1.0:g=-5," +
+      "equalizer=f=1900:width_type=q:w=1.1:g=6," +
+      "vibrato=f=6.5:d=0.22",
+  },
+  // Small, fast and bright, with only a light wobble so it stays clear.
+  chipmunk: {
+    pitch: 1.34,
+    chain: "equalizer=f=2600:width_type=q:w=1.0:g=3,vibrato=f=5:d=0.10",
+  },
+  // Bright and airy rather than squeaky — a lighter touch than chipmunk.
+  sparkle: {
+    pitch: 1.22,
+    chain: "equalizer=f=3000:width_type=q:w=1.0:g=2.5,vibrato=f=4.5:d=0.08",
+  },
+  // Not-from-here: chorus detunes copies of the voice against itself and
+  // tremolo pulses the level, which reads as "modulated" without touching
+  // the words themselves.
+  alien: {
+    pitch: 1.16,
+    chain:
+      "chorus=0.6:0.9:50|60:0.4|0.32:0.25|0.4:2|1.3,tremolo=f=6:d=0.35",
+  },
+  // Big and rumbling: lift the low end, take the presence band down.
+  bear: {
+    pitch: 0.78,
+    chain:
+      "equalizer=f=140:width_type=q:w=1.0:g=4," +
+      "equalizer=f=2500:width_type=q:w=1.0:g=-2",
+  },
+  // Deadpan and dry — lowered a little, presence dulled, no movement at
+  // all. The joke is that it refuses to be excited.
+  grumpy: {
+    pitch: 0.86,
+    chain:
+      "equalizer=f=180:width_type=q:w=1.0:g=3," +
+      "equalizer=f=3000:width_type=q:w=1.2:g=-3",
+  },
+};
+
 /**
  * Builds an ffmpeg filter_complex string that draws the title (for the
  * whole video) and each caption segment (only while it's active) over the
@@ -1156,6 +1213,7 @@ function buildFilterComplex({
   logoInputIndex = null,
   cartoonMode = false,
   pitchRatio = 1.0,
+  voiceEffect = null,
 }) {
   const filters = [];
   let currentLabel = "0:v";
@@ -1296,53 +1354,52 @@ function buildFilterComplex({
     "[vfinal]"
   );
 
-  // Audio: voice is input 1 always. Run it through a compressor + touch of
-  // room tone first (applied to every recording, not opt-in — see session
-  // notes), then, if there's a music bed, duck it dynamically under the
-  // voice with a sidechain compressor rather than a flat static volume cut:
-  //   - acompressor: 4:1 ratio with makeup=3 (real gain boost, not just
-  //     evening things out) — quiet mumbled passages get pulled up, loud
-  //     passages get pulled down, and the result is louder overall, which
-  //     matters a lot given these recordings come from all kinds of phone
-  //     mics/rooms and users reported the voice getting buried under music.
-  //   - aecho, as a lightweight stand-in for a proper reverb (ffmpeg's
-  //     stock build has no true reverb filter — afreeverb isn't actually
-  //     compiled in, confirmed empirically against the ffmpeg build the
-  //     Dockerfile installs). CAUTION, confirmed empirically: aecho's
-  //     out_gain scales the ENTIRE output (dry voice included), not just
-  //     the added echo taps as its docs read at a glance — out_gain=0.15 (a
-  //     previous version of this code) was silently crushing the whole
-  //     voice track to ~15% level, which was very likely the real cause of
-  //     "music overpowering the vocals": the music's static duck was tuned
-  //     against a full-level voice that, after this filter, was no longer
-  //     full level. out_gain MUST stay at 1 — use small `decays` values
-  //     instead to keep the echo taps themselves subtle relative to the
-  //     now-correctly-full-level dry signal.
-  //   - sidechaincompress (only with a music bed): ffmpeg does not allow
-  //     reusing one filter output as the input to two different filters —
-  //     asplit makes the two copies this needs (one to actually mix in, one
-  //     as the sidechain key). The music bed only ducks WHILE the voice is
-  //     actually speaking (fast attack, slower release) and returns to its
-  //     fuller base level during pauses, instead of sitting at one flat
-  //     quiet level for the entire prayer regardless of whether anyone's
-  //     talking at that instant.
-  // Funny Cartoon category: pitch/speed-shift the TTS voice via ffmpeg's
-  // classic asetrate trick (resample the audio at a different rate, then
-  // tell ffmpeg to play it back at the original rate — pitch and speed
-  // necessarily move together, which is exactly the chipmunk/slow-giant
-  // effect we want here, not a flaw to work around). Applied before the
-  // compressor/echo below so those still act on the final, already-shifted
-  // voice. 44100 matches the sample rate TTS audio (and everything else in
-  // this pipeline) is produced at.
-  const voiceSource =
-    cartoonMode && pitchRatio !== 1.0
-      ? (() => {
-          filters.push(
-            `[1:a]asetrate=44100*${pitchRatio},aresample=44100[voice_pitched]`
-          );
-          return "voice_pitched";
-        })()
-      : "1:a";
+  // FUNNY CARTOON VOICES.
+  //
+  // Two things make a voice sound like a character: where its pitch sits,
+  // and how that pitch MOVES. Both are done here, on the TTS audio, and
+  // only in cartoonMode — a real recorded prayer is never processed this
+  // way.
+  //
+  // The pitch shift is ffmpeg's asetrate trick: resample the audio at a
+  // different rate, then tell ffmpeg it is still 44100. That moves pitch
+  // and speed together — play a tape faster and the voice goes up AND
+  // gets quicker. The first version of this shipped exactly that, and the
+  // speed-up is what made the prayers unfollowable.
+  //
+  // atempo is the correction. Running it at the reciprocal of the pitch
+  // ratio puts the DURATION back exactly where it started while leaving
+  // the pitch shifted. Measured: a 6.034s clip at ratios 1.45 / 1.25 /
+  // 0.78 comes back 6.034s every time, with the fundamental landing on
+  // 319.0 / 275.0 / 171.7 Hz against 220 Hz in — pitch moved, clock did
+  // not. atempo's valid range is 0.5-2.0, which comfortably contains the
+  // reciprocals of every ratio in VOICE_EFFECTS.
+  //
+  // The per-preset chain after it is the character: nasal EQ and a fast
+  // vibrato make a duck, a low shelf makes a bear, chorus plus tremolo
+  // makes something not-from-here. Deliberately kept short of the point
+  // where words stop being words — this is a prayer, and a prayer you
+  // cannot follow is broken however funny the voice.
+  const effect =
+    (cartoonMode && voiceEffect && VOICE_EFFECTS[voiceEffect]) || null;
+  // No named preset: fall back to any legacy pitch_ratio on the row, but
+  // run it through the same tempo compensation so an old value can never
+  // reintroduce the speed-up.
+  const effectivePitch = effect ? effect.pitch : pitchRatio;
+  const effectChain = effect ? effect.chain : null;
+
+  let voiceSource = "1:a";
+  if (cartoonMode && (effectivePitch !== 1.0 || effectChain)) {
+    const stages = [];
+    if (effectivePitch !== 1.0) {
+      stages.push(`asetrate=44100*${effectivePitch}`);
+      stages.push("aresample=44100");
+      stages.push(`atempo=${(1 / effectivePitch).toFixed(6)}`);
+    }
+    if (effectChain) stages.push(effectChain);
+    filters.push(`[1:a]${stages.join(",")}[voice_char]`);
+    voiceSource = "voice_char";
+  }
 
   // EQ -> compression -> reverb, in that order (the standard vocal chain
   // order: the compressor should react to the already-EQ'd signal, and the
