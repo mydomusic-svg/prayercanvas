@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -25,6 +26,10 @@ export default function PrayerActions({
   const supabase = createClient();
   const router = useRouter();
   const [downloading, setDownloading] = useState(false);
+  // Free plan gets a limited number of downloads per rolling 24 hours (see
+  // /api/prayers/[id]/download). null means unlimited or not yet known.
+  const [downloadsLeft, setDownloadsLeft] = useState<number | null>(null);
+  const [limitHit, setLimitHit] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [shareState, setShareState] = useState<"idle" | "copied" | "error">("idle");
@@ -42,7 +47,38 @@ export default function PrayerActions({
   async function handleDownload() {
     if (!videoUrl) return;
     setDownloading(true);
+    setLimitHit(false);
     try {
+      // Ask the server to spend one of the free plan's daily downloads
+      // BEFORE fetching the file, so the count reflects downloads actually
+      // granted. Paid plans always come back allowed. A network failure
+      // here is deliberately non-blocking (see the catch below): being
+      // unable to reach the quota endpoint should not stop someone saving
+      // their own prayer.
+      let allowed = true;
+      try {
+        const res = await fetch(`/api/prayers/${prayerId}/download`, {
+          method: "POST",
+        });
+        if (res.status === 429) {
+          allowed = false;
+          const body = await res.json().catch(() => null);
+          setDownloadsLeft(body?.remaining ?? 0);
+        } else if (res.ok) {
+          const body = await res.json().catch(() => null);
+          setDownloadsLeft(
+            body?.unlimited ? null : (body?.remaining ?? null)
+          );
+        }
+      } catch {
+        // Quota endpoint unreachable — fail open rather than trap the user.
+      }
+
+      if (!allowed) {
+        setLimitHit(true);
+        return;
+      }
+
       const file = await fetchVideoFile();
       if (!file) throw new Error("Couldn't fetch video");
       const objectUrl = URL.createObjectURL(file);
@@ -175,6 +211,26 @@ export default function PrayerActions({
         <p className="w-full text-xs text-red-600">
           Couldn&apos;t share or copy the link — try downloading instead.
         </p>
+      )}
+      {limitHit ? (
+        <p className="w-full text-xs text-sage-700">
+          You&apos;ve used your 3 free downloads for today.{" "}
+          <Link href="/pricing" className="underline">
+            Upgrade for unlimited downloads
+          </Link>{" "}
+          — or try again tomorrow.
+        </p>
+      ) : (
+        // Only worth showing once they're actually close to the cap —
+        // "3 left" on every card is noise, "1 left" is useful.
+        downloadsLeft !== null &&
+        downloadsLeft <= 1 && (
+          <p className="w-full text-xs text-sage-500">
+            {downloadsLeft === 0
+              ? "That was your last free download today."
+              : "1 free download left today."}
+          </p>
+        )
       )}
     </div>
   );

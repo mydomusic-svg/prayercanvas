@@ -42,6 +42,24 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 5000);
 const VIDEO_BUCKET = "prayer-videos";
 
+// Rendered videos are the single biggest thing this app stores, so they are
+// not kept forever. A free-tier user's video is deleted this many hours
+// after it finished rendering; paid plans are exempt (see runRetentionSweep).
+// Override per-environment without a redeploy via Railway variables.
+const FREE_VIDEO_RETENTION_HOURS = Number(
+  process.env.FREE_VIDEO_RETENTION_HOURS ?? 24
+);
+// How often the sweep runs. It is cheap (one indexed query most of the
+// time) but there is no reason to run it on every 5-second poll.
+const RETENTION_SWEEP_INTERVAL_MS = Number(
+  process.env.RETENTION_SWEEP_INTERVAL_MS ?? 60 * 60 * 1000
+);
+// Belt-and-braces: a bug in the query below should never be able to wipe
+// the whole library in one pass. If a sweep ever wants to delete more than
+// this many prayers at once, it does this many and leaves the rest for the
+// next run — which also gives a human a chance to notice.
+const RETENTION_SWEEP_MAX_PRAYERS = 200;
+
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   console.error(
     "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables."
@@ -170,6 +188,7 @@ async function main() {
     if (shuttingDown) return;
     let handled = false;
     try {
+      await maybeRunRetentionSweep();
       handled = await processNextJob();
     } catch (err) {
       console.error("Unexpected error in poll loop:", err);
@@ -182,6 +201,172 @@ async function main() {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Deletes a prayer's rendered video + thumbnail objects from Storage.
+ *
+ * Every render writes to render-{jobId}.mp4 / thumbnail-{jobId}.jpg — a
+ * fresh filename per job, done deliberately so a re-render can never be
+ * served a stale cached copy under a URL that already exists. The cost of
+ * that choice is that nothing ever cleaned up the PREVIOUS render, so
+ * re-rendering a prayer five times left five full videos in the bucket with
+ * only the newest reachable. This is what collects them.
+ *
+ * Pass keepJobId to leave the current render in place (the re-render case);
+ * omit it to remove everything for that prayer (the retention case).
+ *
+ * Rather than reconstructing filenames from job ids, this lists the prayer's
+ * folder and deletes what is actually there — so renders orphaned before
+ * this function existed get cleaned up too.
+ */
+async function deletePrayerVideoFiles(userId, prayerId, keepJobId = null) {
+  const folder = `${userId}/${prayerId}`;
+  const { data: files, error } = await supabase.storage
+    .from(VIDEO_BUCKET)
+    .list(folder, { limit: 1000 });
+  if (error) {
+    console.error(`Could not list ${folder}: ${error.message}`);
+    return 0;
+  }
+  if (!files || files.length === 0) return 0;
+
+  const keep = keepJobId
+    ? [`render-${keepJobId}.mp4`, `thumbnail-${keepJobId}.jpg`]
+    : [];
+  const doomed = files
+    .map((f) => f.name)
+    .filter((n) => !keep.includes(n))
+    .map((n) => `${folder}/${n}`);
+
+  if (doomed.length === 0) return 0;
+
+  const { error: rmError } = await supabase.storage
+    .from(VIDEO_BUCKET)
+    .remove(doomed);
+  if (rmError) {
+    console.error(`Could not delete ${doomed.length} file(s): ${rmError.message}`);
+    return 0;
+  }
+  return doomed.length;
+}
+
+let lastRetentionSweepAt = 0;
+
+/**
+ * Deletes rendered videos belonging to free-tier users once they are older
+ * than FREE_VIDEO_RETENTION_HOURS. Paid accounts are exempt and keep theirs
+ * indefinitely.
+ *
+ * IMPORTANT, by design: this deletes the VIDEO FILES only. The prayer row,
+ * its transcript, captions and the original recording all stay, so nothing
+ * the user actually wrote or said is lost, the prayer still appears in their
+ * dashboard, and it can be re-rendered on demand. Deleting the prayer itself
+ * would make expiry destructive and unrecoverable; deleting just the render
+ * reclaims essentially all of the storage (an MP4 dwarfs a row of text)
+ * while staying reversible.
+ *
+ * Plan lookup is deliberately fail-safe: if users.plan cannot be read for
+ * any reason, that user is treated as PAID and skipped. Failing to delete
+ * is a storage cost; wrongly deleting a paying customer's video is not
+ * recoverable.
+ */
+async function runRetentionSweep() {
+  const cutoff = new Date(
+    Date.now() - FREE_VIDEO_RETENTION_HOURS * 3600 * 1000
+  ).toISOString();
+
+  const { data: jobs, error } = await supabase
+    .from("render_jobs")
+    .select("id, prayer_id, completed_at")
+    .eq("status", "complete")
+    .not("output_url", "is", null)
+    .lt("completed_at", cutoff)
+    .order("completed_at", { ascending: true })
+    .limit(RETENTION_SWEEP_MAX_PRAYERS);
+
+  if (error) {
+    console.error(`Retention sweep: could not query render_jobs: ${error.message}`);
+    return;
+  }
+  if (!jobs || jobs.length === 0) return;
+
+  // Resolve each job's owner, then that owner's plan, in two batched
+  // queries rather than one per job.
+  const prayerIds = [...new Set(jobs.map((j) => j.prayer_id))];
+  const { data: prayers, error: prayerError } = await supabase
+    .from("prayers")
+    .select("id, user_id")
+    .in("id", prayerIds);
+  if (prayerError || !prayers) {
+    console.error(
+      `Retention sweep: could not load prayers: ${prayerError?.message}`
+    );
+    return;
+  }
+  const ownerOf = new Map(prayers.map((p) => [p.id, p.user_id]));
+
+  const userIds = [...new Set(prayers.map((p) => p.user_id))];
+  const paidUsers = new Set();
+  const { data: users, error: userError } = await supabase
+    .from("users")
+    .select("id, plan")
+    .in("id", userIds);
+  if (userError) {
+    // See the fail-safe note above — if plans are unreadable (e.g. the
+    // column does not exist yet because billing was never switched on),
+    // delete NOTHING rather than risk deleting a paying customer's video.
+    console.error(
+      `Retention sweep: could not read plans, skipping this sweep: ${userError.message}`
+    );
+    return;
+  }
+  for (const u of users ?? []) {
+    if (u.plan && u.plan !== "free") paidUsers.add(u.id);
+  }
+
+  let deletedFiles = 0;
+  let expiredPrayers = 0;
+
+  for (const job of jobs) {
+    const userId = ownerOf.get(job.prayer_id);
+    if (!userId || paidUsers.has(userId)) continue;
+
+    const removed = await deletePrayerVideoFiles(userId, job.prayer_id);
+    deletedFiles += removed;
+    expiredPrayers++;
+
+    // Clear the URLs so the app stops advertising a file that is gone. The
+    // job row itself is kept as the record that a render happened.
+    await supabase
+      .from("render_jobs")
+      .update({ output_url: null, thumbnail_url: null })
+      .eq("id", job.id);
+
+    // Same for the media_assets pointer to the rendered file.
+    await supabase
+      .from("media_assets")
+      .delete()
+      .eq("prayer_id", job.prayer_id)
+      .eq("type", "rendered_video");
+  }
+
+  if (expiredPrayers > 0) {
+    console.log(
+      `Retention sweep: expired ${expiredPrayers} free-tier prayer video(s), ` +
+        `${deletedFiles} file(s) deleted (older than ${FREE_VIDEO_RETENTION_HOURS}h).`
+    );
+  }
+}
+
+async function maybeRunRetentionSweep() {
+  if (Date.now() - lastRetentionSweepAt < RETENTION_SWEEP_INTERVAL_MS) return;
+  lastRetentionSweepAt = Date.now();
+  try {
+    await runRetentionSweep();
+  } catch (err) {
+    console.error("Retention sweep failed:", err);
+  }
 }
 
 async function processNextJob() {
@@ -678,6 +863,31 @@ async function renderPrayer(job, workDir) {
       `Render job ${job.id}: thumbnail upload gave up after 3 attempts: ${lastThumbnailError.message}`
     );
   }
+
+  // Now that the new render is safely uploaded and its URL recorded, drop
+  // any PREVIOUS render/thumbnail for this prayer. Filenames are unique per
+  // job (deliberately, to defeat CDN caching), so without this every
+  // re-render left another full MP4 behind in the bucket forever, with only
+  // the newest one reachable. Deleting after the successful upload — never
+  // before — means a failed render can't destroy the copy the user still
+  // has. A failure here is logged, not thrown: leaving a stale file behind
+  // is a storage cost, not a reason to fail an otherwise-good render.
+  try {
+    const removed = await deletePrayerVideoFiles(prayer.user_id, prayer.id, job.id);
+    if (removed > 0) {
+      console.log(`Render job ${job.id}: cleaned up ${removed} superseded file(s).`);
+    }
+  } catch (err) {
+    console.error(`Render job ${job.id}: cleanup of old renders failed: ${err.message}`);
+  }
+
+  // Replace, don't accumulate: the previous rendered_video row points at a
+  // file that was just deleted above.
+  await supabase
+    .from("media_assets")
+    .delete()
+    .eq("prayer_id", prayer.id)
+    .eq("type", "rendered_video");
 
   await supabase.from("media_assets").insert({
     prayer_id: prayer.id,
