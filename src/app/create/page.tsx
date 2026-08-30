@@ -760,37 +760,21 @@ export default function CreatePrayerPage() {
               (pickRandomMusicStyleId), which also means two prayers made with
               the same category don't come out with identical music. */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {categories.map((cat) => {
-              const count = musicStyles.filter(
-                (m) => (m.category || "Other") === cat
-              ).length;
-              return (
-                <button
-                  key={cat}
-                  type="button"
-                  onClick={() => setMusicCategory(cat)}
-                  className={`rounded-lg border px-4 py-3 text-sm transition ${
-                    musicCategory === cat
-                      ? "border-sage-600 bg-sage-600 text-white"
-                      : "border-sage-300 hover:bg-sage-50"
-                  }`}
-                >
-                  {cat}
-                  <span
-                    className={`ml-1.5 text-xs ${
-                      musicCategory === cat ? "text-sage-200" : "text-sage-400"
-                    }`}
-                  >
-                    {count}
-                  </span>
-                </button>
-              );
-            })}
+            {categories.map((cat) => (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setMusicCategory(cat)}
+                className={`rounded-lg border px-4 py-3 text-sm transition ${
+                  musicCategory === cat
+                    ? "border-sage-600 bg-sage-600 text-white"
+                    : "border-sage-300 hover:bg-sage-50"
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
           </div>
-          <p className="text-xs text-sage-400">
-            A track from this category is picked for you, so each prayer gets
-            a fresh one.
-          </p>
       </section>
         );
       })()}
