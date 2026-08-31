@@ -81,6 +81,8 @@ export interface PhotoStyle {
   id: string;
   name: string;
   image_asset: string;
+  /** Small WebP for the picker grid; null until make-thumbnails.mjs runs. */
+  thumb_asset: string | null;
   category: string | null;
   source: string | null;
   license: string | null;
@@ -95,6 +97,8 @@ export interface CartoonCharacter {
   id: string;
   name: string;
   image_asset: string;
+  /** Small WebP for the picker grid; null until make-thumbnails.mjs runs. */
+  thumb_asset: string | null;
   openai_voice: string;
   pitch_ratio: number;
   category: string | null;

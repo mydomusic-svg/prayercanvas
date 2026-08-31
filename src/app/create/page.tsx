@@ -186,7 +186,7 @@ export default function CreatePrayerPage() {
       });
     supabase
       .from("photo_styles")
-      .select("id, name, image_asset, category, source, license")
+      .select("id, name, image_asset, thumb_asset, category, source, license")
       .order("category", { ascending: true })
       .order("created_at", { ascending: true })
       .then(({ data }) => {
@@ -194,7 +194,7 @@ export default function CreatePrayerPage() {
       });
     supabase
       .from("cartoon_characters")
-      .select("id, name, image_asset, openai_voice, pitch_ratio, category, source, license")
+      .select("id, name, image_asset, thumb_asset, openai_voice, pitch_ratio, category, source, license")
       .order("created_at", { ascending: true })
       .then(({ data }) => {
         if (data) setCartoonCharacters(data as CartoonCharacter[]);
@@ -587,7 +587,13 @@ export default function CreatePrayerPage() {
               >
                 {/* eslint-disable-next-line @next/next/no-img-element -- remote thumbnail grid, same as the photo library picker above */}
                 <img
-                  src={character.image_asset}
+                  // thumb_asset is a ~20KB WebP; image_asset is the
+                  // 1.2MB+ original and is only for rendering. Falling
+                  // back keeps this working before make-thumbnails.mjs
+                  // has been run. (0019_picker_thumbnails.sql)
+                  src={character.thumb_asset ?? character.image_asset}
+                  loading="lazy"
+                  decoding="async"
                   alt={character.name}
                   className="aspect-square w-full rounded object-cover"
                 />
@@ -749,8 +755,10 @@ export default function CreatePrayerPage() {
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element -- remote thumbnail grid, Next/Image's remote-pattern config isn't worth it for a seeded stock library */}
                         <img
-                          src={photo.image_asset}
+                          src={photo.thumb_asset ?? photo.image_asset}
                           alt={photo.name}
+                          loading="lazy"
+                          decoding="async"
                           className="aspect-[9/16] w-full object-cover"
                         />
                       </button>

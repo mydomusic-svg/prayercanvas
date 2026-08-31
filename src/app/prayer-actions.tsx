@@ -34,6 +34,17 @@ export default function PrayerActions({
   const [deleting, setDeleting] = useState(false);
   const [shareState, setShareState] = useState<"idle" | "copied" | "error">("idle");
 
+  // iPadOS reports itself as a Mac, so the touch-point check is what
+  // separates an iPad from a desktop Safari. Used only to pick the download
+  // strategy below — nothing about the UI branches on this.
+  function isIos() {
+    if (typeof navigator === "undefined") return false;
+    return (
+      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+    );
+  }
+
   const fileName = `${(title || "prayer").replace(/[^\w\- ]+/g, "").trim() || "prayer"}.mp4`;
 
   async function fetchVideoFile(): Promise<File | null> {
@@ -81,6 +92,25 @@ export default function PrayerActions({
 
       const file = await fetchVideoFile();
       if (!file) throw new Error("Couldn't fetch video");
+
+      // iOS SAFARI DOES NOT SUPPORT <a download>.
+      //
+      // The attribute exists on the element, so feature detection cannot
+      // see the problem — Safari simply ignores it and no file is saved.
+      // Worse, it does not throw, so the catch below never fired: on an
+      // iPhone this whole branch used to silently do nothing while still
+      // having spent one of the three daily free downloads above. Tap
+      // Download, lose a download, get no video.
+      //
+      // The share sheet is the real "save a file" path on iOS: for an mp4
+      // it offers Save Video (straight to Photos) and Save to Files. So on
+      // iOS that is the download, and it is a better result than a file in
+      // the Downloads folder anyway.
+      if (isIos() && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ title: title || "My Prayer", files: [file] });
+        return;
+      }
+
       const objectUrl = URL.createObjectURL(file);
       const a = document.createElement("a");
       a.href = objectUrl;
@@ -88,8 +118,14 @@ export default function PrayerActions({
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(objectUrl);
-    } catch {
+      // Revoking synchronously can cancel a download that has not actually
+      // started yet — the click only queues it. One tick is enough.
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
+    } catch (err) {
+      // The user closing the iOS share sheet is a cancellation, not a
+      // failure — opening the video in a new tab on top of it would be
+      // obnoxious.
+      if (err instanceof Error && err.name === "AbortError") return;
       // Fall back to just opening the video — the user can save it from
       // there (e.g. long-press > Save Video on mobile) even if the fetch
       // above got blocked for some reason.
