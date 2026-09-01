@@ -472,36 +472,39 @@ async function renderPrayer(job, workDir) {
   const textStyle = TEXT_STYLES[prayer.text_style] ?? DEFAULT_TEXT_STYLE;
   const accentColor = ACCENT_COLORS[prayer.accent_color] ?? theme.accent;
 
-  // Cartoon prayers are voiced by the AI TTS track (see the process route),
-  // stored as a separate 'cartoon_audio' asset alongside the user's real
-  // raw_audio recording — prefer it here. Fall back to raw_audio if
-  // synthesis failed or hasn't happened yet, same as any other cartoon-mode
-  // best-effort path in this pipeline.
+  // WHICH AUDIO GETS RENDERED, in order of preference:
+  //
+  //   cartoon_audio   the character's AI voice (Funny Cartoon category)
+  //   narration_audio a narrator reading a typed/pasted prayer (0020)
+  //   raw_audio       the user's own recording
+  //
+  // All three are produced by the process route and stored side by side, so
+  // the fallbacks matter: if synthesis failed for a cartoon or typed
+  // prayer, a prayer that HAS a recording still renders with the real
+  // voice rather than failing outright. cartoon_audio is only considered
+  // in cartoon mode so a character's voice can never leak into a prayer
+  // whose character was later cleared.
+  const audioTypes = [
+    ...(cartoonMode ? ["cartoon_audio"] : []),
+    "narration_audio",
+    "raw_audio",
+  ];
   let audioAsset = null;
   let audioAssetError = null;
-  if (cartoonMode) {
+  for (const type of audioTypes) {
     const { data, error } = await supabase
       .from("media_assets")
       .select("storage_url")
       .eq("prayer_id", prayer.id)
-      .eq("type", "cartoon_audio")
+      .eq("type", type)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    audioAsset = data;
-    audioAssetError = error;
-  }
-  if (!audioAsset) {
-    const { data, error } = await supabase
-      .from("media_assets")
-      .select("storage_url")
-      .eq("prayer_id", prayer.id)
-      .eq("type", "raw_audio")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    audioAsset = data;
     audioAssetError = audioAssetError ?? error;
+    if (data) {
+      audioAsset = data;
+      break;
+    }
   }
   if (!audioAsset) {
     throw new Error(`No audio found for this prayer: ${audioAssetError?.message ?? ""}`);

@@ -58,6 +58,12 @@ export default async function SiteHeader() {
               My Prayers
             </Link>
             <Link
+              href="/bible"
+              className="text-sage-600 hover:text-sage-900"
+            >
+              Bible
+            </Link>
+            <Link
               href="/pricing"
               className="hidden text-sage-600 hover:text-sage-900 sm:inline"
             >

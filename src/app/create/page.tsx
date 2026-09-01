@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { BIBLE_HANDOFF_KEY } from "@/lib/bible";
 import HeroBanner from "../hero-banner";
 import type {
   AccentColor,
@@ -93,6 +94,19 @@ const ACCENT_COLOR_OPTIONS: { id: AccentColor; label: string; hex: string }[] = 
   { id: "ivory", label: "Ivory", hex: "#ffffff" },
 ];
 
+// OpenAI's tts-1 voices, described by how they actually sound reading a
+// prayer rather than by their API names, which mean nothing to anyone
+// choosing one. Used only for typed prayers — a recording already has a
+// voice, and a cartoon character brings its own.
+const NARRATOR_VOICES: { id: string; label: string; description: string }[] = [
+  { id: "nova", label: "Nova", description: "Gentle, hopeful" },
+  { id: "shimmer", label: "Shimmer", description: "Soft, tender" },
+  { id: "alloy", label: "Alloy", description: "Neutral, even" },
+  { id: "echo", label: "Echo", description: "Warm, measured" },
+  { id: "fable", label: "Fable", description: "Bright, expressive" },
+  { id: "onyx", label: "Onyx", description: "Deep, steady" },
+];
+
 export default function CreatePrayerPage() {
   const router = useRouter();
   const supabase = createClient();
@@ -123,6 +137,15 @@ export default function CreatePrayerPage() {
 
   const [recordingState, setRecordingState] = useState<RecordingState>("idle");
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  // Typed/pasted prayers (0020_typed_prayers.sql). "record" keeps the
+  // original flow untouched; "type" swaps the recorder for a textarea and a
+  // narrator picker, and skips the audio upload entirely at submit time.
+  const [inputMode, setInputMode] = useState<"record" | "type">("record");
+  const [prayerText, setPrayerText] = useState("");
+  // Set when the text arrived from the Bible page, purely so the UI can say
+  // where it came from — nothing downstream treats scripture differently.
+  const [fromBible, setFromBible] = useState(false);
+  const [narratorVoice, setNarratorVoice] = useState<string>("nova");
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
 
   // A user-uploaded photo is an alternative to picking a library style
@@ -306,9 +329,48 @@ export default function CreatePrayerPage() {
     return options[Math.floor(Math.random() * options.length)].id;
   }
 
+  // VERSES HANDED OVER FROM THE BIBLE PAGE.
+  //
+  // That page writes the formatted passage to sessionStorage and navigates
+  // here with ?from=bible (a query string would not comfortably hold a long
+  // passage). Landing here with it means the user has already decided to
+  // write rather than speak, so the mode is switched for them. The value is
+  // removed once read, so a later visit to /create does not resurrect a
+  // passage they have already used.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    let handoff: string | null = null;
+    if (params.get("from") === "bible") {
+      try {
+        handoff = sessionStorage.getItem(BIBLE_HANDOFF_KEY);
+        sessionStorage.removeItem(BIBLE_HANDOFF_KEY);
+      } catch {
+        handoff = null;
+      }
+    }
+    // Fallback path for browsers where sessionStorage threw.
+    if (!handoff) handoff = params.get("text");
+    if (handoff) {
+      setPrayerText(handoff);
+      setInputMode("type");
+      setFromBible(true);
+    }
+  }, []);
+
+  const typedPrayer = prayerText.trim();
+  // One or the other is required, never both — whichever mode is showing is
+  // the one that counts, so switching modes cannot submit stale input from
+  // the other.
+  const readyToSubmit =
+    inputMode === "record" ? Boolean(audioBlob) : typedPrayer.length > 0;
+
   async function handleSubmit() {
-    if (!audioBlob) {
-      setError("Record or upload a prayer first.");
+    if (!readyToSubmit) {
+      setError(
+        inputMode === "record"
+          ? "Record or upload a prayer first."
+          : "Write or paste your prayer first."
+      );
       return;
     }
 
@@ -360,6 +422,11 @@ export default function CreatePrayerPage() {
           text_style: textStyle,
           accent_color: accentColor,
           cartoon_character_id: cartoonCharacterId,
+          // Typed prayers carry their text and narrator instead of audio.
+          // Both stay null in record mode so nothing downstream mistakes a
+          // recorded prayer for a written one.
+          input_text: inputMode === "type" ? typedPrayer : null,
+          narrator_voice: inputMode === "type" ? narratorVoice : null,
           privacy: "private",
         })
         .select()
@@ -400,6 +467,10 @@ export default function CreatePrayerPage() {
       //    transcription downstream infers the audio format from this
       //    filename, so a mismatched extension (e.g. always ".webm" for an
       //    iPhone's MP4 recording) breaks transcription silently.
+      // Steps 3 and 4 only apply to a recording. A typed prayer has no
+      // audio to upload — the process route synthesizes narration from
+      // input_text instead (see its narration branch).
+      if (inputMode === "record" && audioBlob) {
       const ext = extensionForMimeType(audioBlob.type);
       const path = `${user.id}/${prayer.id}/raw.${ext}`;
       const { error: uploadError } = await supabase.storage
@@ -420,6 +491,7 @@ export default function CreatePrayerPage() {
       });
 
       if (assetError) throw assetError;
+      }
 
       // 5. Kick off transcription + theme detection (Sprint 2). The render
       //    job itself is created server-side by this route, ONLY after
@@ -509,6 +581,98 @@ export default function CreatePrayerPage() {
         </label>
       </section>
 
+      {/* Speak it or write it. Two tabs rather than one long page with both
+          on it: only one can be used per prayer, and showing a recorder to
+          someone who came to paste a written prayer (or a textarea to
+          someone about to speak) is noise. */}
+      <div className="flex gap-2 rounded-full bg-sage-100 p-1">
+        {(
+          [
+            ["record", "🎙️ Speak it"],
+            ["type", "✍️ Write it"],
+          ] as const
+        ).map(([mode, label]) => (
+          <button
+            key={mode}
+            onClick={() => setInputMode(mode)}
+            className={`flex-1 rounded-full px-4 py-2 text-sm font-medium transition ${
+              inputMode === mode
+                ? "bg-white text-sage-900 shadow-sm"
+                : "text-sage-600 hover:text-sage-900"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {inputMode === "type" ? (
+        <section className="flex flex-col gap-4 rounded-xl border border-sage-200 p-6">
+          {fromBible && (
+            <p className="rounded-lg bg-sage-50 px-4 py-3 text-xs text-sage-600">
+              Scripture brought over from the Bible. Edit it freely — add your
+              own words around it, or send it just as it is.
+            </p>
+          )}
+          <label className="flex flex-col gap-1 text-sm font-medium">
+            Your prayer
+            {/* text-base, not inherited text-sm: any font under 16px makes
+                iOS Safari zoom the page in on focus and never zoom back. */}
+            <textarea
+              value={prayerText}
+              onChange={(e) => setPrayerText(e.target.value)}
+              rows={8}
+              placeholder="Write your prayer here, or paste one you already have…"
+              className="rounded-lg border border-sage-300 px-4 py-3 text-base leading-relaxed"
+            />
+          </label>
+          <p className="text-xs text-sage-400">
+            {typedPrayer.length > 0
+              ? `${typedPrayer.split(/\s+/).length} words — roughly ${Math.max(
+                  1,
+                  Math.round(typedPrayer.split(/\s+/).length / 150)
+                )} min of narration.`
+              : "Your words are read aloud by the narrator you choose below."}
+          </p>
+
+          {cartoonCharacterId ? (
+            <p className="rounded-lg bg-sage-50 px-4 py-3 text-xs text-sage-600">
+              Your cartoon character will read this in their own voice, so
+              the narrator picker is off for this prayer.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <p className="text-sm font-medium">Who reads it</p>
+              <div className="grid grid-cols-2 gap-2">
+                {NARRATOR_VOICES.map((voice) => (
+                  <button
+                    key={voice.id}
+                    onClick={() => setNarratorVoice(voice.id)}
+                    className={`rounded-lg border px-3 py-2 text-left transition ${
+                      narratorVoice === voice.id
+                        ? "border-sage-600 bg-sage-600 text-white"
+                        : "border-sage-300 hover:bg-sage-50"
+                    }`}
+                  >
+                    <span className="block text-sm font-medium">
+                      {voice.label}
+                    </span>
+                    <span
+                      className={`block text-xs ${
+                        narratorVoice === voice.id
+                          ? "text-sage-100"
+                          : "text-sage-500"
+                      }`}
+                    >
+                      {voice.description}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+      ) : (
       <section className="flex flex-col items-center gap-4 rounded-xl border border-sage-200 p-6">
         {recordingState !== "recorded" && (
           <button
@@ -553,6 +717,7 @@ export default function CreatePrayerPage() {
           />
         </label>
       </section>
+      )}
 
       {cartoonCharacters.length > 0 && (
         <section className="flex flex-col gap-3">
@@ -894,11 +1059,13 @@ export default function CreatePrayerPage() {
 
       <button
         onClick={handleSubmit}
-        disabled={submitting || !audioBlob}
+        disabled={submitting || !readyToSubmit}
         className="rounded-full bg-sage-600 px-6 py-3 text-white transition hover:bg-sage-700 disabled:opacity-50"
       >
         {processing
-          ? "Transcribing & analyzing…"
+          ? inputMode === "type"
+            ? "Writing your video…"
+            : "Transcribing & analyzing…"
           : submitting
             ? "Submitting…"
             : "Create Prayer Video"}

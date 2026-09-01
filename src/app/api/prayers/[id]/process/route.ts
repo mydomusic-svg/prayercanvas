@@ -30,7 +30,7 @@ export async function POST(
   const { data: prayer, error: prayerError } = await supabase
     .from("prayers")
     .select(
-      "id, recipient_name, include_recipient_in_title, occasion, cartoon_character_id, style_id, music_style_id, photo_asset_url"
+      "id, recipient_name, include_recipient_in_title, occasion, cartoon_character_id, style_id, music_style_id, photo_asset_url, input_text, narrator_voice"
     )
     .eq("id", id)
     .single();
@@ -48,19 +48,32 @@ export async function POST(
     .limit(1)
     .maybeSingle();
 
-  if (assetError || !audioAsset) {
+  // A typed or pasted prayer (0020_typed_prayers.sql) has no recording at
+  // all, so missing audio is only an error when there is also no text to
+  // fall back on.
+  const typedText = (prayer.input_text ?? "").trim();
+  if ((assetError || !audioAsset) && !typedText) {
     return NextResponse.json(
-      { error: "No audio found for this prayer" },
+      { error: "No audio or text found for this prayer" },
       { status: 400 }
     );
   }
 
   try {
-    const audioResponse = await fetch(audioAsset.storage_url);
-    if (!audioResponse.ok) {
-      throw new Error(`Failed to download audio (${audioResponse.status})`);
-    }
-    const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+    // TYPED PRAYERS SKIP TRANSCRIPTION ENTIRELY.
+    //
+    // When the user wrote the prayer themselves, that text IS the
+    // transcript — and a more faithful one than Whisper could produce from
+    // any recording of it. Running it through speech-to-text would only
+    // introduce errors. Timings come later, from whichever synthesized
+    // narration actually gets rendered.
+    let transcript: string;
+    let segments: Awaited<ReturnType<typeof transcribeAudio>>["segments"] = [];
+    let words: Awaited<ReturnType<typeof transcribeAudio>>["words"] = [];
+
+    if (!audioAsset) {
+      transcript = typedText;
+    } else {
 
     // The uploaded filename's extension reflects the actual recorded
     // container (see create/page.tsx's extensionForMimeType — this used to
@@ -68,25 +81,32 @@ export async function POST(
     // iPhone recordings that are actually MP4/AAC). Whisper infers the
     // audio format from the filename it's given, so pass the real one
     // through instead of always defaulting to "prayer.webm".
-    const storagePath = new URL(audioAsset.storage_url).pathname;
-    const ext = storagePath.split(".").pop()?.toLowerCase() || "webm";
-    const { text: transcript, segments, words } = await transcribeAudio(
-      audioBuffer,
-      `prayer.${ext}`
-    );
+      const audioResponse = await fetch(audioAsset.storage_url);
+      if (!audioResponse.ok) {
+        throw new Error(`Failed to download audio (${audioResponse.status})`);
+      }
+      const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
 
-    if (!transcript.trim()) {
-      throw new Error(
-        "Transcription came back empty — try re-recording with clearer audio."
+      const storagePath = new URL(audioAsset.storage_url).pathname;
+      const ext = storagePath.split(".").pop()?.toLowerCase() || "webm";
+      const result = await transcribeAudio(audioBuffer, `prayer.${ext}`);
+      transcript = result.text;
+      segments = result.segments;
+      words = result.words;
+
+      if (!transcript.trim()) {
+        throw new Error(
+          "Transcription came back empty — try re-recording with clearer audio."
+        );
+      }
+
+      // Diagnostic: word-level timestamps have been coming back empty for
+      // very short recordings — logging counts here so we can confirm
+      // whether audio length is the cause without re-deploying each time.
+      console.log(
+        `Whisper: ${segments.length} segment(s), ${words.length} word(s) for a ${audioBuffer.byteLength}-byte clip.`
       );
     }
-
-    // Diagnostic: word-level timestamps have been coming back empty for very
-    // short recordings — logging counts here so we can confirm whether audio
-    // length is the cause without re-deploying each time we want to check.
-    console.log(
-      `Whisper: ${segments.length} segment(s), ${words.length} word(s) for a ${audioBuffer.byteLength}-byte clip.`
-    );
 
     // AUTO-MATCHING MUSIC AND VISUALS
     //
@@ -332,6 +352,75 @@ export async function POST(
           "Cartoon voice synthesis failed (continuing without it):",
           cartoonErr
         );
+      }
+    }
+
+    // NARRATION FOR A TYPED PRAYER.
+    //
+    // A recorded prayer already has a voice. A typed one has none, so one
+    // is synthesized here and stored as its own 'narration_audio' asset,
+    // which the render worker prefers over raw_audio (see the audioTypes
+    // chain in worker/index.js).
+    //
+    // Skipped entirely when a cartoon character is set: that branch above
+    // has already synthesized the character's voice, and rendering both
+    // would mean paying for two TTS calls to throw one away.
+    //
+    // Best-effort, like the cartoon branch: a prayer that fails synthesis
+    // still exists and can be retried from its detail page.
+    if (!audioAsset && !prayer.cartoon_character_id) {
+      try {
+        const voice = (prayer.narrator_voice || "alloy") as OpenAiVoice;
+        const narrationBuffer = await synthesizeSpeech(transcript, voice);
+
+        const narrationPath = `${user.id}/${id}/narration.mp3`;
+        const { error: narrationUploadError } = await supabase.storage
+          .from("prayer-audio")
+          .upload(narrationPath, narrationBuffer, {
+            contentType: "audio/mpeg",
+            upsert: true,
+          });
+        if (narrationUploadError) throw narrationUploadError;
+
+        const { data: narrationPublicUrl } = supabase.storage
+          .from("prayer-audio")
+          .getPublicUrl(narrationPath);
+
+        const { error: narrationAssetError } = await supabase
+          .from("media_assets")
+          .insert({
+            prayer_id: id,
+            type: "narration_audio",
+            storage_url: narrationPublicUrl.publicUrl,
+          });
+        if (narrationAssetError) throw narrationAssetError;
+
+        // The captions have to follow the narrator's pace, and nothing so
+        // far knows what that is — a typed prayer never went through
+        // Whisper, so captions/word_timings are still empty. Transcribing
+        // the synthesized audio is what produces them. The transcript
+        // itself is deliberately NOT overwritten: the user's own words are
+        // authoritative, and speech-to-text on synthetic speech could only
+        // corrupt them.
+        const narrationTiming = await transcribeAudio(
+          narrationBuffer,
+          "narration.mp3"
+        );
+        if (
+          narrationTiming.words.length > 0 ||
+          narrationTiming.segments.length > 0
+        ) {
+          const { error: timingError } = await supabase
+            .from("prayers")
+            .update({
+              captions: narrationTiming.segments,
+              word_timings: narrationTiming.words,
+            })
+            .eq("id", id);
+          if (timingError) throw timingError;
+        }
+      } catch (narrationErr) {
+        console.error("Narration synthesis failed:", narrationErr);
       }
     }
 
