@@ -407,7 +407,7 @@ async function renderPrayer(job, workDir) {
   const { data: prayer, error: prayerError } = await supabase
     .from("prayers")
     .select(
-      "id, user_id, title, recipient_name, include_recipient_in_title, transcript, captions, word_timings, style_id, music_style_id, photo_asset_url, text_style, accent_color, cartoon_character_id, narration_mode"
+      "id, user_id, title, recipient_name, include_recipient_in_title, transcript, captions, word_timings, style_id, music_style_id, photo_asset_url, text_style, accent_color, cartoon_character_id, narration_mode, scripture_reference"
     )
     .eq("id", job.prayer_id)
     .single();
@@ -618,12 +618,40 @@ async function renderPrayer(job, workDir) {
   // iMessage, Photos, or any other app from an early video frame, completely
   // outside our control — show the full prayer text "at rest" instead of a
   // blank background frame, matching the in-app thumbnail's look.
+  // SCRIPTURE IS SET LARGER THAN A SPOKEN PRAYER.
+  //
+  // A verse is meant to be READ off the screen, often by someone holding a
+  // phone at arm's length, and it is usually short. A recorded prayer's
+  // transcript is longer and is being heard rather than read, so the text
+  // is really there as a caption. Different jobs, different sizes.
+  //
+  // The size only steps up when the passage is genuinely short, because
+  // bigger type in the same space means fewer characters fit: at 52px on a
+  // 21-character wrap, much past ~200 characters starts running off the
+  // bottom of the frame. Longer passages keep the standard size, which is
+  // still perfectly readable — better a slightly smaller verse than one
+  // whose last line is missing.
+  const scriptureReference = prayer.scripture_reference ?? null;
+  const bodyText = prayer.transcript ?? "";
+  const bigScripture = Boolean(scriptureReference) && bodyText.length <= 200;
+  const bodyFontSize = bigScripture ? 52 : 40;
+  const bodyWrapChars = bigScripture ? 21 : 26;
+
   const openingBodyPath = path.join(workDir, "opening-body.txt");
   await writeFile(
     openingBodyPath,
-    wrapText(truncateForThumbnail(prayer.transcript ?? "", 260), 26),
+    wrapText(truncateForThumbnail(bodyText, bigScripture ? 200 : 260), bodyWrapChars),
     "utf8"
   );
+
+  // The citation goes to its own file for the same reason every other burned
+  // string does: textfile= means never hand-escaping punctuation for
+  // ffmpeg's filter parser, and a reference is full of colons.
+  let scriptureRefPath = null;
+  if (scriptureReference) {
+    scriptureRefPath = path.join(workDir, "scripture-ref.txt");
+    await writeFile(scriptureRefPath, scriptureReference, "utf8");
+  }
 
   const captions = Array.isArray(prayer.captions) ? prayer.captions : [];
   const captionFiles = [];
@@ -727,6 +755,8 @@ async function renderPrayer(job, workDir) {
     titlePath,
     titleLineCount,
     openingBodyPath,
+    bodyFontSize,
+    scriptureRefPath,
     captionFiles,
     wordFiles,
     hasBackgroundVideo: Boolean(backgroundVideoPath),
@@ -1245,6 +1275,8 @@ function buildFilterComplex({
   titlePath,
   titleLineCount = 1,
   openingBodyPath,
+  bodyFontSize = 40,
+  scriptureRefPath = null,
   captionFiles,
   wordFiles = [],
   hasBackgroundVideo = false,
@@ -1318,7 +1350,7 @@ function buildFilterComplex({
     const bodyBorderColor = theme.text === "black" ? "white@0.85" : "black@0.6";
     nextLabel = "vcard2";
     filters.push(
-      `[${currentLabel}]drawtext=textfile='${openingBodyPath}':fontfile='${FONT_SERIF}':fontsize=40:fontcolor=${theme.text}:` +
+      `[${currentLabel}]drawtext=textfile='${openingBodyPath}':fontfile='${FONT_SERIF}':fontsize=${bodyFontSize}:fontcolor=${theme.text}:` +
         `bordercolor=${bodyBorderColor}:borderw=2:shadowcolor=black@0.35:shadowx=2:shadowy=2:` +
         `line_spacing=20:x=(w-text_w)/2:y=${bodyY}[${nextLabel}]`
     );
@@ -1363,6 +1395,30 @@ function buildFilterComplex({
       );
       currentLabel = nextLabel;
     });
+  }
+
+  // SCRIPTURE CITATION along the bottom.
+  //
+  // Drawn here, after the captions and before the watermark, so it sits
+  // above the background but is never covered by anything.
+  //
+  // y=h-262 is chosen against the two things already down there: captions
+  // are drawn at y=h-380 at 48px (so they end around h-300 even on a second
+  // line), and the watermark sits at y=h-196. This lands cleanly between
+  // them. Left-aligned at x=36 rather than centred, because the watermark
+  // occupies the bottom-right and a centred citation drifts into it on
+  // longer references like "1 Thessalonians 5:16-18 (WEB)".
+  //
+  // Deliberately smaller and quieter than the verse itself — a citation is
+  // an attribution, not part of the prayer.
+  if (scriptureRefPath) {
+    nextLabel = "vref";
+    filters.push(
+      `[${currentLabel}]drawtext=textfile='${scriptureRefPath}':fontfile='${FONT_SERIF}':fontsize=34:fontcolor=white@0.92:` +
+        `bordercolor=black@0.55:borderw=2:shadowcolor=black@0.35:shadowx=2:shadowy=2:` +
+        `x=36:y=h-262[${nextLabel}]`
+    );
+    currentLabel = nextLabel;
   }
 
   // Brand watermark: small, semi-transparent logo mark PLUS the actual

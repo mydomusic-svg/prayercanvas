@@ -145,6 +145,9 @@ export default function CreatePrayerPage() {
   // Set when the text arrived from the Bible page, purely so the UI can say
   // where it came from — nothing downstream treats scripture differently.
   const [fromBible, setFromBible] = useState(false);
+  // "Psalms 23:1-4 (KJV)" — drawn along the bottom of the video, and kept
+  // out of the spoken text (0023_scripture_reference.sql).
+  const [scriptureReference, setScriptureReference] = useState<string | null>(null);
   const [narratorVoice, setNarratorVoice] = useState<string>("nova");
   // How a written prayer is voiced (0022_narration_mode.sql).
   const [narrationMode, setNarrationMode] =
@@ -343,20 +346,35 @@ export default function CreatePrayerPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     let handoff: string | null = null;
+    let citation: string | null = null;
     if (params.get("from") === "bible") {
       try {
-        handoff = sessionStorage.getItem(BIBLE_HANDOFF_KEY);
+        const stored = sessionStorage.getItem(BIBLE_HANDOFF_KEY);
         sessionStorage.removeItem(BIBLE_HANDOFF_KEY);
+        if (stored) {
+          // Newer handoffs are JSON carrying text and citation separately;
+          // a plain string is an older one, still handled so a tab opened
+          // before this change doesn't break.
+          try {
+            const parsed = JSON.parse(stored);
+            handoff = parsed?.text ?? null;
+            citation = parsed?.citation ?? null;
+          } catch {
+            handoff = stored;
+          }
+        }
       } catch {
         handoff = null;
       }
     }
     // Fallback path for browsers where sessionStorage threw.
     if (!handoff) handoff = params.get("text");
+    if (!citation) citation = params.get("ref");
     if (handoff) {
       setPrayerText(handoff);
       setInputMode("type");
       setFromBible(true);
+      if (citation) setScriptureReference(citation);
     }
   }, []);
 
@@ -445,6 +463,7 @@ export default function CreatePrayerPage() {
           // a silent prayer that had also paid for character speech.
           narration_mode:
             inputMode === "type" && !usingCartoon ? narrationMode : null,
+          scripture_reference: inputMode === "type" ? scriptureReference : null,
           privacy: "private",
         })
         .select()
@@ -630,6 +649,13 @@ export default function CreatePrayerPage() {
             <p className="rounded-lg bg-sage-50 px-4 py-3 text-xs text-sage-600">
               Scripture brought over from the Bible. Edit it freely — add your
               own words around it, or send it just as it is.
+              {scriptureReference && (
+                <>
+                  {" "}
+                  <strong className="font-medium">{scriptureReference}</strong>{" "}
+                  appears along the bottom of the video.
+                </>
+              )}
             </p>
           )}
           <label className="flex flex-col gap-1 text-sm font-medium">

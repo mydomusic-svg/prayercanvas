@@ -60,11 +60,10 @@ export const BIBLE_HANDOFF_KEY = "prayercanvas:bible-text";
 /**
  * Turns a verse selection into the text a narrator will read.
  *
- * Verse NUMBERS are deliberately left out of the body — "The Lord is my
- * shepherd; I shall not want" is a prayer, and "1 The Lord is my shepherd 2
- * He maketh me" is a numbered list read aloud. Consecutive verses are joined
- * into flowing prose, and the reference is appended once at the end so the
- * passage is still properly cited in the video and its captions.
+ * Verse NUMBERS are deliberately left out — "The Lord is my shepherd; I
+ * shall not want" is a prayer, and "1 The Lord is my shepherd 2 He maketh
+ * me" is a numbered list read aloud. Consecutive verses join into flowing
+ * prose. The citation is NOT included here; see formatCitation.
  */
 export function formatVerseSelection(
   verses: BibleVerse[],
@@ -77,8 +76,28 @@ export function formatVerseSelection(
       a.book_order - b.book_order || a.chapter - b.chapter || a.verse - b.verse
   );
 
-  const body = sorted.map((v) => v.text.trim()).join(" ");
-  return `${body}\n\n— ${formatReference(sorted)} (${translation})`;
+  return sorted.map((v) => v.text.trim()).join(" ");
+}
+
+/**
+ * The citation for a selection, e.g. "Psalms 23:1-4 (KJV)".
+ *
+ * Kept separate from the verse text on purpose (0023_scripture_reference).
+ * When it was appended to the body, the narrator read it out — "...I shall
+ * not want, em-dash Psalms twenty-three one to four, K J V" — which is not
+ * how anyone says a verse aloud. It now travels alongside the text and is
+ * drawn along the bottom of the video instead.
+ */
+export function formatCitation(
+  verses: BibleVerse[],
+  translation: BibleTranslation
+): string {
+  if (verses.length === 0) return "";
+  const sorted = [...verses].sort(
+    (a, b) =>
+      a.book_order - b.book_order || a.chapter - b.chapter || a.verse - b.verse
+  );
+  return `${formatReference(sorted)} (${translation})`;
 }
 
 /**

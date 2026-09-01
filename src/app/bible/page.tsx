@@ -8,6 +8,7 @@ import {
   BIBLE_TRANSLATIONS,
   BIBLE_HANDOFF_KEY,
   formatVerseSelection,
+  formatCitation,
   parseReference,
   type BibleVerse,
   type BibleTranslation,
@@ -40,6 +41,31 @@ export default function BiblePage() {
   // Selected verses, keyed by id so a verse found through search and the
   // same verse seen while reading a chapter can never both be added.
   const [selected, setSelected] = useState<Map<number, BibleVerse>>(new Map());
+
+  // Reader text size. Scripture is read for a long time and often by people
+  // who find small type genuinely hard, so this is an accessibility control
+  // rather than a nicety — and it persists, because someone who needs large
+  // type needs it every visit, not once.
+  const [textScale, setTextScale] = useState(1);
+  useEffect(() => {
+    try {
+      const saved = Number(localStorage.getItem("prayercanvas:bible-text-scale"));
+      if (saved >= 1 && saved <= 2) setTextScale(saved);
+    } catch {
+      // Blocked storage just means the default size; not worth surfacing.
+    }
+  }, []);
+  function cycleTextScale() {
+    // 1 -> 1.25 -> 1.5 -> 1.75 -> back to 1. A cycle rather than +/- buttons
+    // keeps it to one control in a header that is already busy on a phone.
+    const next = textScale >= 1.75 ? 1 : Number((textScale + 0.25).toFixed(2));
+    setTextScale(next);
+    try {
+      localStorage.setItem("prayercanvas:bible-text-scale", String(next));
+    } catch {
+      // Non-fatal — the size still applies for this visit.
+    }
+  }
 
   const toggle = useCallback((verse: BibleVerse) => {
     setSelected((prev) => {
@@ -226,13 +252,24 @@ export default function BiblePage() {
   // a comfortable URL length, and this text is only ever meant for the very
   // next page.
   function makePrayerVideo() {
-    const text = formatVerseSelection([...selected.values()], translation);
+    const chosen = [...selected.values()];
+    const text = formatVerseSelection(chosen, translation);
+    const citation = formatCitation(chosen, translation);
     try {
-      sessionStorage.setItem(BIBLE_HANDOFF_KEY, text);
+      // Text and citation travel together as JSON so the create page can
+      // keep them apart — the words get spoken, the citation gets drawn
+      // along the bottom of the video (0023_scripture_reference.sql).
+      sessionStorage.setItem(
+        BIBLE_HANDOFF_KEY,
+        JSON.stringify({ text, citation })
+      );
     } catch {
       // Private mode or blocked storage — fall through to the query string,
       // which is lossy for very long selections but better than nothing.
-      router.push(`/create?text=${encodeURIComponent(text.slice(0, 1500))}`);
+      router.push(
+        `/create?text=${encodeURIComponent(text.slice(0, 1500))}` +
+          `&ref=${encodeURIComponent(citation)}`
+      );
       return;
     }
     router.push("/create?from=bible");
@@ -245,11 +282,24 @@ export default function BiblePage() {
 
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-8 pb-40">
-      <div className="flex flex-col gap-2">
-        <h1 className="font-headline text-3xl font-bold">The Bible</h1>
-        <p className="text-sm text-sage-600">
-          Read, search, and turn any passage into a prayer video.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-2">
+          <h1 className="font-headline text-3xl font-bold">The Bible</h1>
+          <p className="text-sm text-sage-600">
+            Read, search, and turn any passage into a prayer video.
+          </p>
+        </div>
+        <button
+          onClick={cycleTextScale}
+          title={`Text size: ${Math.round(textScale * 100)}%`}
+          aria-label={`Change text size, currently ${Math.round(textScale * 100)} percent`}
+          className="flex shrink-0 items-center gap-1 rounded-full border border-sage-300 px-3 py-2 text-sm transition hover:bg-sage-50"
+        >
+          <span aria-hidden className="text-base">🔍</span>
+          <span className="tabular-nums text-xs text-sage-600">
+            {Math.round(textScale * 100)}%
+          </span>
+        </button>
       </div>
 
       <div className="flex gap-2 rounded-full bg-sage-100 p-1">
@@ -322,6 +372,7 @@ export default function BiblePage() {
                 showReference
                 selected={selected.has(v.id)}
                 onToggle={toggle}
+                scale={textScale}
               />
             ))}
           </div>
@@ -386,6 +437,7 @@ export default function BiblePage() {
                   verse={v}
                   selected={selected.has(v.id)}
                   onToggle={toggle}
+                  scale={textScale}
                 />
               ))}
             </div>
@@ -460,11 +512,13 @@ function VerseRow({
   selected,
   onToggle,
   showReference = false,
+  scale = 1,
 }: {
   verse: BibleVerse;
   selected: boolean;
   onToggle: (v: BibleVerse) => void;
   showReference?: boolean;
+  scale?: number;
 }) {
   return (
     <button
@@ -475,7 +529,13 @@ function VerseRow({
           : "border-transparent hover:bg-sage-50"
       }`}
     >
-      <span className="text-sm leading-relaxed">
+      {/* Scaled from the 14px base rather than swapping Tailwind classes, so
+          the magnifier can offer in-between steps and the verse-number and
+          body text grow together. */}
+      <span
+        className="leading-relaxed"
+        style={{ fontSize: `${14 * scale}px` }}
+      >
         <span className="mr-2 font-semibold text-sage-500">
           {showReference ? `${verse.book} ${verse.chapter}:${verse.verse}` : verse.verse}
         </span>
