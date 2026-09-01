@@ -81,6 +81,15 @@ const FONT_SERIF = path.join(
   import.meta.dirname,
   "fonts/PlayfairDisplay-Regular.ttf"
 );
+// The prayer/scripture body is set in the BOLD weight, not the regular one.
+// Burned-in video text competes with whatever is moving behind it, and gets
+// watched on a phone at arm's length — the regular weight's thin strokes
+// break up against a busy background even with an outline behind them. Bold
+// strokes survive that. This font was already bundled and simply unused.
+const FONT_SERIF_BOLD = path.join(
+  import.meta.dirname,
+  "fonts/PlayfairDisplay-Bold.ttf"
+);
 // Small brand watermark burned into every rendered video and thumbnail
 // (bottom-right corner, semi-transparent) — same mark used in the app's own
 // header/login screens (public/logo-mark.png), copied into the worker image
@@ -634,8 +643,16 @@ async function renderPrayer(job, workDir) {
   const scriptureReference = prayer.scripture_reference ?? null;
   const bodyText = prayer.transcript ?? "";
   const bigScripture = Boolean(scriptureReference) && bodyText.length <= 200;
-  const bodyFontSize = bigScripture ? 52 : 40;
-  const bodyWrapChars = bigScripture ? 21 : 26;
+  // Sizes stepped up (40 -> 46, scripture 52 -> 58) and the wrap pulled in
+  // to match. The wrap numbers are not proportional guesses: bold Playfair
+  // is about 6% wider per character than the regular weight on top of the
+  // size increase, and the measured worst-case line has to stay inside
+  // 1080px minus a comfortable margin. Both were checked by rendering the
+  // widest line each can produce (22 capital Ws at 46px measures 990px; 17
+  // at 58px measures 953px) — 18 characters at the scripture size came out
+  // at 1009px, leaving only 35px of margin, so it was pulled in by one.
+  const bodyFontSize = bigScripture ? 58 : 46;
+  const bodyWrapChars = bigScripture ? 17 : 22;
 
   const openingBodyPath = path.join(workDir, "opening-body.txt");
   await writeFile(
@@ -1049,7 +1066,9 @@ async function generateThumbnail({
   const bodyLinesPath = path.join(workDir, "thumb-body.txt");
   await writeFile(
     bodyLinesPath,
-    wrapText(truncateForThumbnail(transcript, 260), 30),
+    // 30 -> 26 for the same reason as the video body: the thumbnail's text
+    // is now bold and 46px, so fewer characters fit on a line.
+    wrapText(truncateForThumbnail(transcript, 260), 26),
     "utf8"
   );
 
@@ -1104,7 +1123,7 @@ async function generateThumbnail({
   const titleBlockHeight = titleLineCount * (textStyle.thumbFontSize * 1.25 + 6);
   const bodyY = Math.round(TITLE_TOP_Y + titleBlockHeight + 40);
   filters.push(
-    `[s2]drawtext=textfile='${bodyLinesPath}':fontfile='${FONT_SERIF}':fontsize=40:fontcolor=${theme.text}:` +
+    `[s2]drawtext=textfile='${bodyLinesPath}':fontfile='${FONT_SERIF_BOLD}':fontsize=46:fontcolor=${theme.text}:` +
       `bordercolor=${bodyBorderColor}:borderw=2:shadowcolor=black@0.35:shadowx=2:shadowy=2:` +
       `line_spacing=20:x=(w-text_w)/2:y=${bodyY}[s3]`
   );
@@ -1350,7 +1369,7 @@ function buildFilterComplex({
     const bodyBorderColor = theme.text === "black" ? "white@0.85" : "black@0.6";
     nextLabel = "vcard2";
     filters.push(
-      `[${currentLabel}]drawtext=textfile='${openingBodyPath}':fontfile='${FONT_SERIF}':fontsize=${bodyFontSize}:fontcolor=${theme.text}:` +
+      `[${currentLabel}]drawtext=textfile='${openingBodyPath}':fontfile='${FONT_SERIF_BOLD}':fontsize=${bodyFontSize}:fontcolor=${theme.text}:` +
         `bordercolor=${bodyBorderColor}:borderw=2:shadowcolor=black@0.35:shadowx=2:shadowy=2:` +
         `line_spacing=20:x=(w-text_w)/2:y=${bodyY}[${nextLabel}]`
     );
@@ -1380,7 +1399,7 @@ function buildFilterComplex({
     wordFiles.forEach((word, i) => {
       nextLabel = `v${i + 1}`;
       filters.push(
-        `[${currentLabel}]drawtext=textfile='${word.path}':fontfile='${FONT_BOLD}':fontsize=58:fontcolor=white:` +
+        `[${currentLabel}]drawtext=textfile='${word.path}':fontfile='${FONT_BOLD}':fontsize=64:fontcolor=white:` +
           `box=1:boxcolor=0xf5b301@0.85:boxborderw=18:` +
           `x=(w-text_w)/2:y=h-380:enable='between(t,${word.start},${word.end})'[${nextLabel}]`
       );
@@ -1390,7 +1409,7 @@ function buildFilterComplex({
     captionFiles.forEach((cap, i) => {
       nextLabel = `v${i + 1}`;
       filters.push(
-        `[${currentLabel}]drawtext=textfile='${cap.path}':fontfile='${FONT_REGULAR}':fontsize=48:fontcolor=${theme.text}:` +
+        `[${currentLabel}]drawtext=textfile='${cap.path}':fontfile='${FONT_BOLD}':fontsize=54:fontcolor=${theme.text}:` +
           `x=(w-text_w)/2:y=h-380:enable='between(t,${cap.start},${cap.end})'[${nextLabel}]`
       );
       currentLabel = nextLabel;
