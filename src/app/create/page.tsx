@@ -146,6 +146,9 @@ export default function CreatePrayerPage() {
   // where it came from — nothing downstream treats scripture differently.
   const [fromBible, setFromBible] = useState(false);
   const [narratorVoice, setNarratorVoice] = useState<string>("nova");
+  // How a written prayer is voiced (0022_narration_mode.sql).
+  const [narrationMode, setNarrationMode] =
+    useState<"narrator" | "self" | "none">("narrator");
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
 
   // A user-uploaded photo is an alternative to picking a library style
@@ -362,14 +365,20 @@ export default function CreatePrayerPage() {
   // the one that counts, so switching modes cannot submit stale input from
   // the other.
   const readyToSubmit =
-    inputMode === "record" ? Boolean(audioBlob) : typedPrayer.length > 0;
+    inputMode === "record"
+      ? Boolean(audioBlob)
+      : narrationMode === "self"
+        ? typedPrayer.length > 0 && Boolean(audioBlob)
+        : typedPrayer.length > 0;
 
   async function handleSubmit() {
     if (!readyToSubmit) {
       setError(
         inputMode === "record"
           ? "Record or upload a prayer first."
-          : "Write or paste your prayer first."
+          : narrationMode === "self" && typedPrayer.length > 0
+            ? "Record yourself reading it, or choose a different voice."
+            : "Write or paste your prayer first."
       );
       return;
     }
@@ -426,7 +435,16 @@ export default function CreatePrayerPage() {
           // Both stay null in record mode so nothing downstream mistakes a
           // recorded prayer for a written one.
           input_text: inputMode === "type" ? typedPrayer : null,
-          narrator_voice: inputMode === "type" ? narratorVoice : null,
+          narrator_voice:
+            inputMode === "type" && narrationMode === "narrator"
+              ? narratorVoice
+              : null,
+          // A cartoon character always wins: it brings its own voice, and
+          // the picker above is hidden when one is chosen. Without this,
+          // choosing "no voice" and THEN picking a character would submit
+          // a silent prayer that had also paid for character speech.
+          narration_mode:
+            inputMode === "type" && !usingCartoon ? narrationMode : null,
           privacy: "private",
         })
         .select()
@@ -470,7 +488,7 @@ export default function CreatePrayerPage() {
       // Steps 3 and 4 only apply to a recording. A typed prayer has no
       // audio to upload — the process route synthesizes narration from
       // input_text instead (see its narration branch).
-      if (inputMode === "record" && audioBlob) {
+      if (audioBlob && (inputMode === "record" || narrationMode === "self")) {
       const ext = extensionForMimeType(audioBlob.type);
       const path = `${user.id}/${prayer.id}/raw.${ext}`;
       const { error: uploadError } = await supabase.storage
@@ -638,37 +656,122 @@ export default function CreatePrayerPage() {
           {cartoonCharacterId ? (
             <p className="rounded-lg bg-sage-50 px-4 py-3 text-xs text-sage-600">
               Your cartoon character will read this in their own voice, so
-              the narrator picker is off for this prayer.
+              the voice options are off for this prayer.
             </p>
           ) : (
-            <div className="flex flex-col gap-2">
-              <p className="text-sm font-medium">Who reads it</p>
-              <div className="grid grid-cols-2 gap-2">
-                {NARRATOR_VOICES.map((voice) => (
+            <div className="flex flex-col gap-3">
+              <p className="text-sm font-medium">How should it be heard?</p>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {(
+                  [
+                    ["narrator", "🔊 A narrator reads it", "Pick a voice below"],
+                    ["self", "🎙️ I'll read it myself", "Record your own voice"],
+                    ["none", "🔇 No voice", "Text, image and music only"],
+                  ] as const
+                ).map(([mode, label, hint]) => (
                   <button
-                    key={voice.id}
-                    onClick={() => setNarratorVoice(voice.id)}
-                    className={`rounded-lg border px-3 py-2 text-left transition ${
-                      narratorVoice === voice.id
+                    key={mode}
+                    onClick={() => setNarrationMode(mode)}
+                    className={`rounded-lg border px-3 py-3 text-left transition ${
+                      narrationMode === mode
                         ? "border-sage-600 bg-sage-600 text-white"
                         : "border-sage-300 hover:bg-sage-50"
                     }`}
                   >
-                    <span className="block text-sm font-medium">
-                      {voice.label}
-                    </span>
+                    <span className="block text-sm font-medium">{label}</span>
                     <span
                       className={`block text-xs ${
-                        narratorVoice === voice.id
-                          ? "text-sage-100"
-                          : "text-sage-500"
+                        narrationMode === mode ? "text-sage-100" : "text-sage-500"
                       }`}
                     >
-                      {voice.description}
+                      {hint}
                     </span>
                   </button>
                 ))}
               </div>
+
+              {narrationMode === "narrator" && (
+                <div className="flex flex-col gap-2">
+                  <p className="text-sm font-medium">Who reads it</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {NARRATOR_VOICES.map((voice) => (
+                      <button
+                        key={voice.id}
+                        onClick={() => setNarratorVoice(voice.id)}
+                        className={`rounded-lg border px-3 py-2 text-left transition ${
+                          narratorVoice === voice.id
+                            ? "border-sage-600 bg-sage-600 text-white"
+                            : "border-sage-300 hover:bg-sage-50"
+                        }`}
+                      >
+                        <span className="block text-sm font-medium">
+                          {voice.label}
+                        </span>
+                        <span
+                          className={`block text-xs ${
+                            narratorVoice === voice.id
+                              ? "text-sage-100"
+                              : "text-sage-500"
+                          }`}
+                        >
+                          {voice.description}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Reading it yourself: the same recorder as Speak it, but the
+                  written text above stays as the on-screen wording. */}
+              {narrationMode === "self" && (
+                <div className="flex flex-col items-center gap-3 rounded-lg border border-sage-200 p-4">
+                  {recordingState !== "recorded" && (
+                    <button
+                      onClick={
+                        recordingState === "recording"
+                          ? stopRecording
+                          : startRecording
+                      }
+                      className={`rounded-full px-6 py-3 text-white transition ${
+                        recordingState === "recording"
+                          ? "bg-red-600 hover:bg-red-500"
+                          : "bg-sage-600 hover:bg-sage-700"
+                      }`}
+                    >
+                      {recordingState === "recording"
+                        ? "Stop Recording"
+                        : "Record yourself reading it"}
+                    </button>
+                  )}
+                  {audioUrl && (
+                    <div className="flex w-full flex-col items-center gap-2">
+                      <audio src={audioUrl} controls className="w-full" />
+                      <button
+                        onClick={() => {
+                          setAudioBlob(null);
+                          setAudioUrl(null);
+                          setRecordingState("idle");
+                        }}
+                        className="text-sm text-sage-500 underline"
+                      >
+                        Re-record
+                      </button>
+                    </div>
+                  )}
+                  <p className="text-center text-xs text-sage-400">
+                    Your voice plays; the words above are what appear on
+                    screen.
+                  </p>
+                </div>
+              )}
+
+              {narrationMode === "none" && (
+                <p className="rounded-lg bg-sage-50 px-4 py-3 text-xs text-sage-600">
+                  The video will hold on your image with the words on screen
+                  and music playing, long enough to read comfortably.
+                </p>
+              )}
             </div>
           )}
         </section>

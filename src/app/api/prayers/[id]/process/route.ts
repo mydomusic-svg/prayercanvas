@@ -34,7 +34,7 @@ export async function POST(
   const { data: prayer, error: prayerError } = await supabase
     .from("prayers")
     .select(
-      "id, recipient_name, include_recipient_in_title, occasion, cartoon_character_id, style_id, music_style_id, photo_asset_url, input_text, narrator_voice"
+      "id, recipient_name, include_recipient_in_title, occasion, cartoon_character_id, style_id, music_style_id, photo_asset_url, input_text, narrator_voice, narration_mode"
     )
     .eq("id", id)
     .single();
@@ -56,6 +56,7 @@ export async function POST(
   // all, so missing audio is only an error when there is also no text to
   // fall back on.
   const typedText = (prayer.input_text ?? "").trim();
+  const narrationMode = prayer.narration_mode ?? "narrator";
   if ((assetError || !audioAsset) && !typedText) {
     return NextResponse.json(
       { error: "No audio or text found for this prayer" },
@@ -94,9 +95,17 @@ export async function POST(
       const storagePath = new URL(audioAsset.storage_url).pathname;
       const ext = storagePath.split(".").pop()?.toLowerCase() || "webm";
       const result = await transcribeAudio(audioBuffer, `prayer.${ext}`);
-      transcript = result.text;
       segments = result.segments;
       words = result.words;
+      // READING YOUR OWN WRITTEN PRAYER ALOUD.
+      //
+      // When there is both a recording and written text, the WRITTEN text
+      // is the transcript and the recording only supplies caption timing.
+      // This matters most for scripture: what appears on screen should be
+      // the verse as translated, not Whisper's impression of someone
+      // reading it, which drops "thou"s and mishears proper nouns. The
+      // spoken audio is still what plays.
+      transcript = typedText || result.text;
 
       if (!transcript.trim()) {
         throw new Error(
@@ -375,7 +384,14 @@ export async function POST(
     //
     // Best-effort, like the cartoon branch: a prayer that fails synthesis
     // still exists and can be retried from its detail page.
-    if (!audioAsset && !prayer.cartoon_character_id) {
+    // Only the narrator mode synthesizes anything. 'self' already has the
+    // user's own recording, and 'none' is silent by design — paying for TTS
+    // in either case would produce audio nothing ever plays.
+    if (
+      !audioAsset &&
+      !prayer.cartoon_character_id &&
+      narrationMode === "narrator"
+    ) {
       try {
         const voice = (prayer.narrator_voice || "alloy") as OpenAiVoice;
         const narrationBuffer = await synthesizeSpeech(transcript, voice);

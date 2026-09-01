@@ -8,6 +8,7 @@ import {
   BIBLE_TRANSLATIONS,
   BIBLE_HANDOFF_KEY,
   formatVerseSelection,
+  parseReference,
   type BibleVerse,
   type BibleTranslation,
 } from "@/lib/bible";
@@ -148,6 +149,66 @@ export default function BiblePage() {
     }
     setSearching(true);
     setError(null);
+
+    // A REFERENCE IS NOT A SEARCH.
+    //
+    // Someone typing "John 3:16" knows exactly what they want; running that
+    // through full-text search would rank verses containing the word "john"
+    // and never show them the one verse they asked for. So a parseable
+    // reference jumps straight there and pre-selects the verses, ready to
+    // send into a prayer. Anything that isn't a reference — "the lord is my
+    // shepherd", "comfort" — falls through to the keyword search below.
+    const ref = parseReference(q);
+    if (ref) {
+      const { data, error: refError } = await supabase
+        .from("bible_verses")
+        .select("id, translation, book_order, book, chapter, verse, text")
+        .eq("translation", translation)
+        .eq("book", ref.book)
+        .eq("chapter", ref.chapter)
+        .order("verse", { ascending: true });
+
+      if (refError) {
+        setError(refError.message);
+        setSearching(false);
+        return;
+      }
+      const chapterVerses = (data as BibleVerse[]) ?? [];
+      if (chapterVerses.length === 0) {
+        setError(
+          `${ref.book} ${ref.chapter} isn't in this translation — check the chapter number.`
+        );
+        setSearching(false);
+        return;
+      }
+
+      // Show the chapter in the reader rather than as a result list, so the
+      // surrounding verses are right there to add.
+      setResults(null);
+      setBook(ref.book);
+      setChapter(ref.chapter);
+      setQuery("");
+
+      // Pre-select the requested verses. Asking for a whole chapter with no
+      // verse selects nothing — selecting 150 verses of Psalm 119 for
+      // someone who typed "Psalm 119" would be a hostile guess.
+      if (ref.verseStart !== null) {
+        const end = ref.verseEnd ?? ref.verseStart;
+        const wanted = chapterVerses.filter(
+          (v) => v.verse >= ref.verseStart! && v.verse <= end
+        );
+        if (wanted.length === 0) {
+          setError(
+            `${ref.book} ${ref.chapter} only has ${chapterVerses.length} verses.`
+          );
+        } else {
+          setSelected(new Map(wanted.map((v) => [v.id, v])));
+        }
+      }
+      setSearching(false);
+      return;
+    }
+
     // search_bible wraps websearch_to_tsquery, which stems ("comfort" finds
     // "comforted") and tolerates the punctuation a person actually types.
     const { data, error: searchError } = await supabase.rpc("search_bible", {
@@ -217,7 +278,7 @@ export default function BiblePage() {
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search for a word or phrase…"
+          placeholder="A verse like John 3:16, or a word like comfort…"
           className="flex-1 rounded-lg border border-sage-300 px-4 py-2 text-base"
         />
         <button

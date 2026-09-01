@@ -407,7 +407,7 @@ async function renderPrayer(job, workDir) {
   const { data: prayer, error: prayerError } = await supabase
     .from("prayers")
     .select(
-      "id, user_id, title, recipient_name, include_recipient_in_title, transcript, captions, word_timings, style_id, music_style_id, photo_asset_url, text_style, accent_color, cartoon_character_id"
+      "id, user_id, title, recipient_name, include_recipient_in_title, transcript, captions, word_timings, style_id, music_style_id, photo_asset_url, text_style, accent_color, cartoon_character_id, narration_mode"
     )
     .eq("id", job.prayer_id)
     .single();
@@ -472,6 +472,40 @@ async function renderPrayer(job, workDir) {
   const textStyle = TEXT_STYLES[prayer.text_style] ?? DEFAULT_TEXT_STYLE;
   const accentColor = ACCENT_COLORS[prayer.accent_color] ?? theme.accent;
 
+  // NO-VOICE PRAYERS.
+  //
+  // A prayer can be sent as scripture on screen with music behind it and no
+  // one reading it aloud (narration_mode = 'none'). There is no audio asset
+  // to find, and nothing to measure a duration against, so both are
+  // synthesized here instead: a silent track of the right length, generated
+  // and then fed in exactly where a voice recording would go.
+  //
+  // Generating silence rather than restructuring the filter graph is
+  // deliberate. Every input index, every filter label and the whole
+  // ducking chain downstream assume a voice at input 1; removing it would
+  // mean rewiring all of that for one mode. A silent input keeps one code
+  // path, and it behaves correctly by construction — the ducking
+  // compressor has nothing to duck against, so the music simply plays at
+  // its full level throughout, which is what a no-voice prayer wants.
+  const narrationMode = prayer.narration_mode ?? "narrator";
+  const silentPrayer = narrationMode === "none";
+
+  let audioPath;
+  let duration;
+
+  if (silentPrayer) {
+    duration = estimateReadingSeconds(prayer.transcript || "");
+    audioPath = path.join(workDir, "silence.m4a");
+    await execFileAsync("ffmpeg", [
+      "-y",
+      "-f", "lavfi",
+      "-i", "anullsrc=r=44100:cl=stereo",
+      "-t", duration.toFixed(2),
+      "-c:a", "aac",
+      audioPath,
+    ]);
+    await updateJob(job.id, { progress: 30 });
+  } else {
   // WHICH AUDIO GETS RENDERED, in order of preference:
   //
   //   cartoon_audio   the character's AI voice (Funny Cartoon category)
@@ -527,15 +561,16 @@ async function renderPrayer(job, workDir) {
     // Malformed URL is unexpected but shouldn't crash the render — fall
     // back to the old default extension.
   }
-  const audioPath = path.join(workDir, `audio${audioExt}`);
+  audioPath = path.join(workDir, `audio${audioExt}`);
   await downloadFile(audioAsset.storage_url, audioPath);
 
-  const duration = await getAudioDuration(audioPath);
+  duration = await getAudioDuration(audioPath);
   if (!duration || duration <= 0) {
     throw new Error("Could not determine audio duration.");
   }
 
   await updateJob(job.id, { progress: 30 });
+  } // end !silentPrayer
 
   // Title is burned directly into the video (and thumbnail) again — an
   // earlier version of this pipeline made it a live page/player overlay
@@ -696,6 +731,7 @@ async function renderPrayer(job, workDir) {
     wordFiles,
     hasBackgroundVideo: Boolean(backgroundVideoPath),
     hasMusic: Boolean(musicPath),
+    silentPrayer,
     logoInputIndex,
     cartoonMode,
     pitchRatio: cartoonCharacter?.pitch_ratio ?? 1.0,
@@ -1213,6 +1249,7 @@ function buildFilterComplex({
   wordFiles = [],
   hasBackgroundVideo = false,
   hasMusic = false,
+  silentPrayer = false,
   logoInputIndex = null,
   cartoonMode = false,
   pitchRatio = 1.0,
@@ -1467,7 +1504,15 @@ function buildFilterComplex({
   );
 
   if (hasMusic) {
-    filters.push(`[voice_proc]asplit=2[voice][voice_sc]`);
+    // The split exists solely to feed the ducking sidechain. In a no-voice
+    // prayer there is no ducking, so splitting would leave [voice_sc]
+    // unconsumed and ffmpeg refuses a filtergraph with an unconnected
+    // output pad — the render would fail outright rather than degrade.
+    if (silentPrayer) {
+      filters.push(`[voice_proc]anull[voice]`);
+    } else {
+      filters.push(`[voice_proc]asplit=2[voice][voice_sc]`);
+    }
     // Base music level raised from 0.22 -> 0.5, and the sidechain duck eased
     // (ratio 10 -> 4, threshold 0.03 -> 0.06, release 400 -> 600) after users
     // reported the music being nearly inaudible under the voice. The old
@@ -1478,6 +1523,19 @@ function buildFilterComplex({
     // at a real, audible bed level and only dips moderately while the voice
     // is speaking, then comes back up between phrases, instead of getting
     // nearly muted for the whole track.
+    // NO-VOICE PRAYERS PLAY THE MUSIC AT FULL LEVEL.
+    //
+    // 0.5 and the ducking below exist to keep a bed underneath a speaking
+    // voice. With no voice there is nothing to sit under: the music IS the
+    // soundtrack, and leaving it at bed level makes a silent prayer sound
+    // like something went wrong. Measured on a real render, routing silence
+    // through the ducking path still left the bed ~3dB under its own
+    // reference level — audible, but quieter than it has any reason to be.
+    //
+    // So skip both. alimiter downstream still catches any peak.
+    if (silentPrayer) {
+      filters.push(`[2:a]volume=1.0[music]`);
+    } else {
     filters.push(`[2:a]volume=0.5[music_pre]`);
     // Ratio raised 4 -> 8 (and threshold 0.06 -> 0.05) now that the library
     // includes tracks with their own singing in them. Two voices at once is
@@ -1494,6 +1552,7 @@ function buildFilterComplex({
     filters.push(
       `[music_pre][voice_sc]sidechaincompress=threshold=0.05:ratio=8:attack=5:release=500:makeup=1[music]`
     );
+    } // end !silentPrayer music bed
     // normalize=0: amix defaults to auto-scaling every input down by 1/N,
     // which would quietly halve the voice track on top of the ducking
     // above — disable that so only the explicit levels above apply.
@@ -1538,6 +1597,26 @@ async function downloadFile(url, destPath) {
   }
   const buffer = Buffer.from(await res.arrayBuffer());
   await writeFile(destPath, buffer);
+}
+
+/**
+ * How long a no-voice prayer should stay on screen, from its text.
+ *
+ * With nobody reading aloud there is no audio to measure, but the video
+ * still has to last long enough to READ. 0.42s per word is about 145 words
+ * a minute — slower than speech, because someone reading scripture off a
+ * screen goes back over lines, and a verse that vanishes mid-sentence is
+ * worse than one that lingers.
+ *
+ * The floor stops a one-line prayer flashing past before the music has even
+ * established itself; the ceiling stops a long passage producing a
+ * several-minute video nobody will watch to the end (and which would cost
+ * real render time and storage).
+ */
+function estimateReadingSeconds(text) {
+  const words = (text || "").trim().split(/\s+/).filter(Boolean).length;
+  const seconds = words * 0.42 + 2.5;
+  return Math.min(Math.max(seconds, 10), 90);
 }
 
 async function getAudioDuration(audioPath) {
