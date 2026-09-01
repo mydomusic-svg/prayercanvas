@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { transcribeAudio } from "@/lib/ai/transcribe";
 import { analyzePrayer } from "@/lib/ai/analyze";
-import { synthesizeSpeech, type OpenAiVoice } from "@/lib/ai/tts";
+import {
+  synthesizeSpeech,
+  CARTOON_SPEED,
+  type OpenAiVoice,
+} from "@/lib/ai/tts";
 import { matchCategoriesByKeyword } from "@/lib/ai/keyword-match";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -292,9 +296,12 @@ export async function POST(
           throw characterError ?? new Error("Cartoon character not found");
         }
 
+        // Characters stay at full speed — a slowed-down duck is not funny,
+        // it just sounds sedated. Only the plain narrator is calmed down.
         const cartoonAudioBuffer = await synthesizeSpeech(
           transcript,
-          character.openai_voice as OpenAiVoice
+          character.openai_voice as OpenAiVoice,
+          CARTOON_SPEED
         );
 
         const cartoonAudioPath = `${user.id}/${id}/cartoon.mp3`;

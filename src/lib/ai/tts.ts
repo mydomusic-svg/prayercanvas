@@ -14,6 +14,21 @@ export type OpenAiVoice =
   | "shimmer";
 
 /**
+ * How fast the narrator reads, as a multiplier on tts-1's default.
+ *
+ * The default (1.0) reads at roughly 200+ words per minute — a brisk
+ * newsreader pace. That is wrong for this app: a prayer is meant to be
+ * dwelt on, and a 23-word prayer arriving in six seconds feels rushed past
+ * rather than spoken. 0.85 brings it to roughly 170wpm, close to how
+ * someone actually prays aloud, and gives the words room to land.
+ *
+ * Cartoon characters override this — their whole appeal is being lively,
+ * and slowing them down makes them sound sedated rather than funny.
+ */
+export const NARRATION_SPEED = 0.85;
+export const CARTOON_SPEED = 1.0;
+
+/**
  * Synthesizes speech for the Funny Cartoon category: reads `text` aloud in
  * one of OpenAI's stock TTS voices. Used in place of the user's own
  * recording when a prayer has a cartoon_character_id set (see the process
@@ -25,7 +40,8 @@ export type OpenAiVoice =
  */
 export async function synthesizeSpeech(
   text: string,
-  voice: OpenAiVoice
+  voice: OpenAiVoice,
+  speed: number = NARRATION_SPEED
 ): Promise<Buffer> {
   if (!process.env.OPENAI_API_KEY) {
     throw new Error(
@@ -42,6 +58,9 @@ export async function synthesizeSpeech(
     model: "tts-1",
     voice,
     input: text,
+    // OpenAI accepts 0.25-4.0 and clamps outside that; guard here anyway so
+    // a bad caller can never produce a garbled read.
+    speed: Math.min(Math.max(speed, 0.5), 1.5),
     response_format: "mp3",
   });
 

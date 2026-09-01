@@ -93,18 +93,29 @@ const STYLE_CLIPS = {
 // each side and then fitting is the middle path: bigger subject, nothing
 // lost.
 
-// BACKGROUND STYLES — wide establishing shots (angels over a street, a
-// family walking, a garden) where the subject can sit anywhere in frame, so
-// only 11% comes off each side. The blurred bands that remain are not waste:
-// prayer text is drawn at y=140 and y=h-380, which lands them squarely on
-// those bands, and blurred low-contrast video is the best surface to read
-// text against that this pipeline has.
+// BACKGROUND STYLES — fill the frame completely.
+//
+// These were letterboxed at first: the scene fitted to the width with a
+// blurred, zoomed copy of itself filling the space above and below. In a
+// real render that looked broken rather than deliberate. The bands are a
+// DIFFERENT part of the frame from the sharp scene, so a bright galaxy core
+// smeared across the top sat over a dark starfield below with a hard seam
+// between them — it read as a bug, not a border.
+//
+// Filling instead crops to the middle ~32% of the width, which sounds
+// drastic and is the reason letterboxing was chosen originally. Checking it
+// against the actual clips rather than assuming settled it: every one of
+// these places its subject dead centre with margin to spare. An angel over
+// a family, a cat at a pulpit, a baby dancing, a sunset, a sailboat, a rain
+// cloud — all survive the crop whole, and fill the frame far better than
+// they filled a band. Prayer text sits on the image with its outline and
+// shadow, as it does over every Pexels clip in the library.
+//
+// This is NOT true of the character clips below, where the character spans
+// most of the width; that is why the two treatments differ.
 const VERTICAL_LETTERBOX =
-  "split=2[bg][fg];" +
-  "[bg]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920," +
-  "gblur=sigma=28,eq=brightness=-0.06[bgb];" +
-  "[fg]crop=trunc(iw*0.78/2)*2:ih:trunc(iw*0.11/2)*2:0,scale=1080:-2[fgs];" +
-  "[bgb][fgs]overlay=(W-w)/2:(H-h)/2";
+  "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920," +
+  "unsharp=5:5:0.6:5:5:0.0";
 
 // CHARACTER CLIPS — a single centred character on a plain or softly
 // gradient background. Measured subject extents across the four clips run
@@ -250,7 +261,7 @@ async function main() {
         );
 
         if (!DRY_RUN) {
-          const url = await upload(`videos/anim2-${slug(name)}.mp4`, await readFile(out));
+          const url = await upload(`videos/anim3-${slug(name)}.mp4`, await readFile(out));
           if (alreadyPresent) {
             const { error: updateError } = await supabase
               .from("styles")

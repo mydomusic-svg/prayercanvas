@@ -96,6 +96,49 @@ export default function BiblePage() {
     };
   }, [book, chapter, translation, supabase]);
 
+  // CHAPTER PAGING.
+  //
+  // Reading straight through is the normal way to use a Bible, and having to
+  // go back to the chapter grid between every chapter makes that tedious.
+  // These walk the whole canon rather than stopping at a book boundary: past
+  // the last chapter of Malachi is Matthew 1, and back from Genesis 1 is
+  // nowhere, so the button disables.
+  async function chaptersIn(targetBook: string): Promise<number> {
+    const { data } = await supabase
+      .from("bible_verses")
+      .select("chapter")
+      .eq("translation", translation)
+      .eq("book", targetBook)
+      .order("chapter", { ascending: false })
+      .limit(1);
+    return data?.[0]?.chapter ?? 0;
+  }
+
+  async function step(delta: 1 | -1) {
+    if (!book || !chapter) return;
+    const target = chapter + delta;
+
+    // Still inside this book — the common case.
+    if (target >= 1 && target <= chapterCount) {
+      setChapter(target);
+      window.scrollTo({ top: 0 });
+      return;
+    }
+
+    const bookIdx = BIBLE_BOOKS.indexOf(book);
+    const nextIdx = bookIdx + delta;
+    if (nextIdx < 0 || nextIdx >= BIBLE_BOOKS.length) return;
+
+    const nextBook = BIBLE_BOOKS[nextIdx];
+    // Going forward always lands on chapter 1; going back has to land on the
+    // previous book's LAST chapter, which means asking how many it has.
+    const landing = delta === 1 ? 1 : await chaptersIn(nextBook);
+    if (landing < 1) return;
+    setBook(nextBook);
+    setChapter(landing);
+    window.scrollTo({ top: 0 });
+  }
+
   async function runSearch(e?: React.FormEvent) {
     e?.preventDefault();
     const q = query.trim();
@@ -286,6 +329,29 @@ export default function BiblePage() {
               ))}
             </div>
           )}
+
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <button
+              onClick={() => step(-1)}
+              disabled={book === BIBLE_BOOKS[0] && chapter === 1}
+              className="rounded-full border border-sage-300 px-4 py-2 text-sm transition hover:bg-sage-50 disabled:opacity-40"
+            >
+              ← Previous
+            </button>
+            <span className="text-xs text-sage-400">
+              Chapter {chapter} of {chapterCount}
+            </span>
+            <button
+              onClick={() => step(1)}
+              disabled={
+                book === BIBLE_BOOKS[BIBLE_BOOKS.length - 1] &&
+                chapter === chapterCount
+              }
+              className="rounded-full border border-sage-300 px-4 py-2 text-sm transition hover:bg-sage-50 disabled:opacity-40"
+            >
+              Next →
+            </button>
+          </div>
         </section>
       )}
 
