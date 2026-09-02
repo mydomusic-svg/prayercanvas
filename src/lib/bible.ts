@@ -294,3 +294,96 @@ export const MARK_STYLES: { id: MarkStyle; label: string; icon: string }[] = [
 export function verseKey(book: string, chapter: number, verse: number): string {
   return `${book}|${chapter}|${verse}`;
 }
+
+// ---------------------------------------------------------------------------
+// TOPICS.
+//
+// Full-text search cannot answer the word a person actually reaches for.
+// Measured against this database: the KJV contains "anxiety" ZERO times,
+// "anxious" zero, "worry" zero. It says "Be careful for nothing" and "take no
+// thought" and "casting all your care upon him". A KJV reader searching what
+// they feel gets an empty page. Topics bridge that gap by hand.
+// ---------------------------------------------------------------------------
+export interface BibleTopic {
+  slug: string;
+  label: string;
+  position: number;
+  aliases: string[];
+}
+
+export interface TopicPassage {
+  topic_slug: string;
+  position: number;
+  book_order: number;
+  book: string;
+  chapter: number;
+  verse_start: number;
+  verse_end: number;
+}
+
+// People don't type bare keywords into a Bible search. They type the sentence
+// in their head. Stripping these leaves the word the topic table is keyed on.
+const TOPIC_QUERY_PREFIXES = [
+  "what does the bible say about",
+  "what does the bible say on",
+  "bible verses about",
+  "bible verses on",
+  "bible verses for",
+  "verses about",
+  "verses on",
+  "verses for",
+  "scriptures about",
+  "scripture about",
+  "scripture on",
+  "verse about",
+  "help with",
+  "dealing with",
+  "about",
+];
+
+// Punctuation-and-case flattening, shared by the query and by the labels it
+// is compared against — otherwise typing a topic's own printed name
+// ("Anxiety & worry") fails to match it, because the query loses the
+// ampersand and the label keeps it.
+function flatten(input: string): string {
+  // Apostrophes survive on purpose — one alias is "god's love".
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9'\s-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function normalizeTopicQuery(input: string): string {
+  let q = flatten(input);
+  for (const prefix of TOPIC_QUERY_PREFIXES) {
+    if (q.startsWith(prefix + " ")) {
+      q = q.slice(prefix.length + 1).trim();
+      break;
+    }
+  }
+  return q.replace(/^(i am|i'm|im|i feel|feeling|feel)\s+/, "").trim();
+}
+
+/**
+ * Exact match only — against the slug, the label, or an alias.
+ *
+ * Deliberately NOT fuzzy. A topic that fires on a partial match would hijack
+ * unrelated searches: "loveliness" is not "love", and someone hunting the
+ * word "workman" should not be handed seven verses about money. Exact
+ * matching means a topic either clearly answers what was typed or gets out
+ * of the way and lets full-text search run.
+ */
+export function matchTopic(
+  input: string,
+  topics: BibleTopic[]
+): BibleTopic | null {
+  const q = normalizeTopicQuery(input);
+  if (!q) return null;
+  for (const topic of topics) {
+    if (topic.slug === q) return topic;
+    if (flatten(topic.label) === q) return topic;
+    if (topic.aliases.some((alias) => flatten(alias) === q)) return topic;
+  }
+  return null;
+}
