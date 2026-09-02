@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import PrayerActions from "../prayer-actions";
 import type { RenderJob } from "@/lib/types";
+import VerseOfTheDay from "../verse-of-the-day";
 
 type PrayerCard = {
   id: string;
@@ -98,6 +99,10 @@ export default function PrayerGrid({
 
   return (
     <>
+      {/* Above the list on purpose: this is the one thing on the page that
+          suggests something to DO, and it should be the first thing seen
+          rather than sitting under a wall of past prayers. */}
+      <VerseOfTheDay />
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">My Prayers</h1>
         <div className="flex items-center gap-2">

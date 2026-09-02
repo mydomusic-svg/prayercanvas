@@ -19,6 +19,7 @@ import {
   type BibleVerse,
   type BibleTranslation,
 } from "@/lib/bible";
+import VerseOfTheDay from "../verse-of-the-day";
 
 /**
  * Browse, search, and turn scripture into a prayer video.
@@ -492,6 +493,10 @@ export default function BiblePage() {
       <p className="-mt-4 text-xs text-sage-400">
         {BIBLE_TRANSLATIONS.find((t) => t.id === translation)?.note}
       </p>
+
+      {/* Follows the translation toggle above it, so switching to WEB
+          re-renders today's verse in WEB too. */}
+      <VerseOfTheDay translation={translation} />
 
       <form onSubmit={runSearch} className="flex gap-2">
         <input
