@@ -261,3 +261,36 @@ export function parseReference(input: string): BibleReference | null {
 
   return { book: canonical, chapter, verseStart, verseEnd };
 }
+
+
+/**
+ * Where the Old Testament ends and the New begins.
+ *
+ * Books 1-39 are the Old Testament, 40-66 (Matthew onwards) the New. This
+ * is the Protestant canon, matching what is seeded — other traditions
+ * include additional books, which is a data question rather than a display
+ * one and would be handled by seeding them.
+ */
+export const OLD_TESTAMENT_BOOK_COUNT = 39;
+
+export function testamentOf(bookOrder: number): "Old Testament" | "New Testament" {
+  return bookOrder <= OLD_TESTAMENT_BOOK_COUNT ? "Old Testament" : "New Testament";
+}
+
+export const OLD_TESTAMENT_BOOKS = BIBLE_BOOKS.slice(0, OLD_TESTAMENT_BOOK_COUNT);
+export const NEW_TESTAMENT_BOOKS = BIBLE_BOOKS.slice(OLD_TESTAMENT_BOOK_COUNT);
+
+/** A mark a reader has put on a verse. */
+export type MarkStyle = "highlight" | "bold" | "underline" | "bookmark";
+
+export const MARK_STYLES: { id: MarkStyle; label: string; icon: string }[] = [
+  { id: "highlight", label: "Highlight", icon: "🖍️" },
+  { id: "bold", label: "Bold", icon: "𝗕" },
+  { id: "underline", label: "Underline", icon: "U̲" },
+  { id: "bookmark", label: "Bookmark", icon: "🔖" },
+];
+
+/** Key used to look a verse's marks up client-side. */
+export function verseKey(book: string, chapter: number, verse: number): string {
+  return `${book}|${chapter}|${verse}`;
+}

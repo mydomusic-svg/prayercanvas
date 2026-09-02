@@ -378,6 +378,18 @@ export default function CreatePrayerPage() {
     }
   }, []);
 
+  // Clears the current take. Revoking the object URL matters: the old
+  // inline version dropped the reference without revoking, so every retake
+  // leaked the previous recording's blob for the life of the page.
+  function discardRecording() {
+    setAudioUrl((previous) => {
+      if (previous) URL.revokeObjectURL(previous);
+      return null;
+    });
+    setAudioBlob(null);
+    setRecordingState("idle");
+  }
+
   const typedPrayer = prayerText.trim();
   // One or the other is required, never both — whichever mode is showing is
   // the one that counts, so switching modes cannot submit stale input from
@@ -773,16 +785,23 @@ export default function CreatePrayerPage() {
                   {audioUrl && (
                     <div className="flex w-full flex-col items-center gap-2">
                       <audio src={audioUrl} controls className="w-full" />
-                      <button
-                        onClick={() => {
-                          setAudioBlob(null);
-                          setAudioUrl(null);
-                          setRecordingState("idle");
-                        }}
-                        className="text-sm text-sage-500 underline"
-                      >
-                        Re-record
-                      </button>
+                      <div className="flex items-center gap-4">
+                        <button
+                          onClick={() => {
+                            discardRecording();
+                            startRecording();
+                          }}
+                          className="text-sm text-sage-600 underline"
+                        >
+                          Re-record
+                        </button>
+                        <button
+                          onClick={discardRecording}
+                          className="text-sm text-red-600 underline"
+                        >
+                          Delete recording
+                        </button>
+                      </div>
                     </div>
                   )}
                   <p className="text-center text-xs text-sage-400">
@@ -821,16 +840,29 @@ export default function CreatePrayerPage() {
         {audioUrl && (
           <div className="flex w-full flex-col items-center gap-2">
             <audio src={audioUrl} controls className="w-full" />
-            <button
-              onClick={() => {
-                setAudioBlob(null);
-                setAudioUrl(null);
-                setRecordingState("idle");
-              }}
-              className="text-sm text-sage-500 underline"
-            >
-              Re-record
-            </button>
+            {/* Two different intentions, so two buttons. Re-record means
+                "that take was bad, going again" and starts recording
+                straight away. Delete means "I don't want a recording at
+                all" — it clears and leaves you back at the start, which is
+                also the only way to switch to writing the prayer instead
+                without a stale take hanging around. */}
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => {
+                  discardRecording();
+                  startRecording();
+                }}
+                className="text-sm text-sage-600 underline"
+              >
+                Re-record
+              </button>
+              <button
+                onClick={discardRecording}
+                className="text-sm text-red-600 underline"
+              >
+                Delete recording
+              </button>
+            </div>
           </div>
         )}
 

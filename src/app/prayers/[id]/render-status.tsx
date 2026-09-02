@@ -35,6 +35,25 @@ export default function RenderStatus({
 }) {
   const supabase = createClient();
   const router = useRouter();
+
+  // LEAVING A PRAYER THAT NO LONGER EXISTS.
+  //
+  // This used to be router.push("/dashboard"), which caused a 404 that only
+  // a manual refresh cleared. Two separate reasons, both fixed here:
+  //
+  //   replace, not push — push leaves /prayers/<id> sitting in history, and
+  //   this page calls notFound() when the prayer is missing. Pressing Back,
+  //   or any revalidation of that entry, then renders a hard 404 for a row
+  //   the user themselves just deleted.
+  //
+  //   refresh — the App Router keeps a client-side cache of already-visited
+  //   routes. Without invalidating it the dashboard can render from cache
+  //   and still show the deleted prayer, and the stale /prayers/<id> entry
+  //   stays around to 404 later.
+  function goToDashboardAfterDelete() {
+    router.replace("/dashboard");
+    router.refresh();
+  }
   const [job, setJob] = useState<RenderJob | null>(initialJob);
   // Mirrors the prayer's style_id/music_style_id/photo_asset_url locally so
   // MediaEditor always knows the real "current" values after a swap,
@@ -83,7 +102,7 @@ export default function RenderStatus({
             userId={userId}
             videoUrl={job.output_url}
             title={title}
-            onDeleted={() => router.push("/dashboard")}
+            onDeleted={goToDashboardAfterDelete}
           />
           <ShareButton prayerId={prayerId} />
         </div>
@@ -111,7 +130,7 @@ export default function RenderStatus({
           userId={userId}
           videoUrl={null}
           title={title}
-          onDeleted={() => router.push("/dashboard")}
+          onDeleted={goToDashboardAfterDelete}
         />
       </div>
     );

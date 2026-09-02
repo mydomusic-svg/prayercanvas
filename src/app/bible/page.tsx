@@ -10,6 +10,12 @@ import {
   formatVerseSelection,
   formatCitation,
   parseReference,
+  formatReference,
+  OLD_TESTAMENT_BOOKS,
+  NEW_TESTAMENT_BOOKS,
+  MARK_STYLES,
+  verseKey,
+  type MarkStyle,
   type BibleVerse,
   type BibleTranslation,
 } from "@/lib/bible";
@@ -46,7 +52,16 @@ export default function BiblePage() {
   // who find small type genuinely hard, so this is an accessibility control
   // rather than a nicety — and it persists, because someone who needs large
   // type needs it every visit, not once.
-  const [textScale, setTextScale] = useState(1);
+  // Marks the reader has put on verses, keyed by book|chapter|verse. Loaded
+  // for the chapter on screen rather than all at once — a heavy reader can
+  // accumulate thousands and there is no reason to ship them all.
+  const [marks, setMarks] = useState<Map<string, Set<MarkStyle>>>(new Map());
+  const [bookmarks, setBookmarks] = useState<BibleVerse[] | null>(null);
+  const [commentary, setCommentary] = useState<string | null>(null);
+  const [commentaryRef, setCommentaryRef] = useState<string | null>(null);
+  const [explaining, setExplaining] = useState(false);
+
+    const [textScale, setTextScale] = useState(1);
   useEffect(() => {
     try {
       const saved = Number(localStorage.getItem("prayercanvas:bible-text-scale"));
@@ -164,6 +179,149 @@ export default function BiblePage() {
     setBook(nextBook);
     setChapter(landing);
     window.scrollTo({ top: 0 });
+  }
+
+  const loadMarks = useCallback(async () => {
+    if (!book || !chapter) return;
+    const { data } = await supabase
+      .from("bible_marks")
+      .select("book, chapter, verse, style")
+      .eq("translation", translation)
+      .eq("book", book)
+      .eq("chapter", chapter);
+    const next = new Map<string, Set<MarkStyle>>();
+    for (const m of data ?? []) {
+      const k = verseKey(m.book as string, m.chapter as number, m.verse as number);
+      if (!next.has(k)) next.set(k, new Set());
+      next.get(k)!.add(m.style as MarkStyle);
+    }
+    setMarks(next);
+  }, [book, chapter, translation, supabase]);
+
+  useEffect(() => {
+    loadMarks();
+  }, [loadMarks]);
+
+  // Toggling applies to every selected verse at once. If any selected verse
+  // lacks the style the whole selection gains it; only when they all already
+  // have it does it come off — which is what "toggle" means for a group, and
+  // avoids the checkerboard you get from flipping each verse independently.
+  async function toggleMark(style: MarkStyle) {
+    const chosen = [...selected.values()];
+    if (chosen.length === 0) return;
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      router.push("/login");
+      return;
+    }
+
+    const allHave = chosen.every((v) =>
+      marks.get(verseKey(v.book, v.chapter, v.verse))?.has(style)
+    );
+
+    if (allHave) {
+      for (const v of chosen) {
+        await supabase
+          .from("bible_marks")
+          .delete()
+          .eq("user_id", user.id)
+          .eq("translation", translation)
+          .eq("book", v.book)
+          .eq("chapter", v.chapter)
+          .eq("verse", v.verse)
+          .eq("style", style);
+      }
+    } else {
+      await supabase.from("bible_marks").upsert(
+        chosen.map((v) => ({
+          user_id: user.id,
+          translation,
+          book_order: v.book_order,
+          book: v.book,
+          chapter: v.chapter,
+          verse: v.verse,
+          style,
+        })),
+        {
+          onConflict: "user_id,translation,book_order,chapter,verse,style",
+          ignoreDuplicates: true,
+        }
+      );
+    }
+    await loadMarks();
+    if (bookmarks !== null) await openBookmarks();
+  }
+
+  async function openBookmarks() {
+    const { data: rows } = await supabase
+      .from("bible_marks")
+      .select("book_order, book, chapter, verse")
+      .eq("style", "bookmark")
+      .eq("translation", translation)
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (!rows || rows.length === 0) {
+      setBookmarks([]);
+      return;
+    }
+    // Marks store coordinates, not verse ids (ids move when a translation is
+    // re-seeded), so the text is fetched back here.
+    const { data: verses } = await supabase
+      .from("bible_verses")
+      .select("id, translation, book_order, book, chapter, verse, text")
+      .eq("translation", translation)
+      .in("book", [...new Set(rows.map((r) => r.book as string))]);
+    const wanted = new Set(rows.map((r) => verseKey(r.book as string, r.chapter as number, r.verse as number)));
+    const found = ((verses as BibleVerse[]) ?? []).filter((v) =>
+      wanted.has(verseKey(v.book, v.chapter, v.verse))
+    );
+    found.sort(
+      (a, b) =>
+        a.book_order - b.book_order || a.chapter - b.chapter || a.verse - b.verse
+    );
+    setBookmarks(found);
+    setResults(null);
+  }
+
+  async function explainSelection() {
+    const chosen = [...selected.values()].sort(
+      (a, b) => a.chapter - b.chapter || a.verse - b.verse
+    );
+    if (chosen.length === 0) return;
+    setExplaining(true);
+    setCommentary(null);
+    setError(null);
+    try {
+      const first = chosen[0];
+      const last = chosen[chosen.length - 1];
+      const res = await fetch("/api/bible/explain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          translation,
+          book: first.book,
+          bookOrder: first.book_order,
+          chapter: first.chapter,
+          verseStart: first.verse,
+          verseEnd: last.verse,
+          reference: formatReference(chosen),
+          text: chosen.map((v) => v.text).join(" "),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Couldn't load an explanation.");
+      } else {
+        setCommentary(data.commentary);
+        setCommentaryRef(data.reference);
+      }
+    } catch {
+      setError("Couldn't load an explanation.");
+    } finally {
+      setExplaining(false);
+    }
   }
 
   async function runSearch(e?: React.FormEvent) {
@@ -290,6 +448,17 @@ export default function BiblePage() {
           </p>
         </div>
         <button
+          onClick={() => (bookmarks === null ? openBookmarks() : setBookmarks(null))}
+          className={`flex shrink-0 items-center gap-1 rounded-full border px-3 py-2 text-sm transition ${
+            bookmarks !== null
+              ? "border-sage-600 bg-sage-600 text-white"
+              : "border-sage-300 hover:bg-sage-50"
+          }`}
+        >
+          <span aria-hidden>🔖</span>
+          <span className="text-xs">Saved</span>
+        </button>
+        <button
           onClick={cycleTextScale}
           title={`Text size: ${Math.round(textScale * 100)}%`}
           aria-label={`Change text size, currently ${Math.round(textScale * 100)} percent`}
@@ -346,7 +515,76 @@ export default function BiblePage() {
         </p>
       )}
 
-      {results !== null ? (
+      {commentary && (
+        <section className="flex flex-col gap-3 rounded-xl border border-sage-200 bg-white/70 p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold">Reflection</p>
+              <p className="text-xs text-sage-500">{commentaryRef}</p>
+            </div>
+            <button
+              onClick={() => setCommentary(null)}
+              className="text-sm text-sage-500 underline"
+            >
+              Close
+            </button>
+          </div>
+          {commentary.split(/\n\n+/).map((para, i) => (
+            <p
+              key={i}
+              className="leading-relaxed text-sage-800"
+              style={{ fontSize: `${14 * textScale}px` }}
+            >
+              {para}
+            </p>
+          ))}
+          {/* Said plainly rather than buried in terms: this is generated,
+              it is one reading among many, and it is not a substitute for
+              a person. */}
+          <p className="border-t border-sage-100 pt-3 text-xs text-sage-400">
+            A reflection to sit with, written by AI — one way of reading this
+            passage, not the only one. For anything weighing heavily, talk to
+            someone you trust.
+          </p>
+        </section>
+      )}
+
+      {bookmarks !== null ? (
+        <section className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium">
+              {bookmarks.length === 0
+                ? "No saved verses yet."
+                : `${bookmarks.length} saved verse${bookmarks.length === 1 ? "" : "s"}`}
+            </p>
+            <button
+              onClick={() => setBookmarks(null)}
+              className="text-sm text-sage-500 underline"
+            >
+              Back to reading
+            </button>
+          </div>
+          {bookmarks.length === 0 && (
+            <p className="text-sm text-sage-500">
+              Select a verse while reading and choose 🔖 Bookmark to keep it
+              here.
+            </p>
+          )}
+          <div className="flex flex-col gap-2">
+            {bookmarks.map((v) => (
+              <VerseRow
+                key={v.id}
+                verse={v}
+                showReference
+                selected={selected.has(v.id)}
+                onToggle={toggle}
+                scale={textScale}
+                styles={marks.get(verseKey(v.book, v.chapter, v.verse))}
+              />
+            ))}
+          </div>
+        </section>
+      ) : results !== null ? (
         <section className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium">
@@ -373,27 +611,47 @@ export default function BiblePage() {
                 selected={selected.has(v.id)}
                 onToggle={toggle}
                 scale={textScale}
+                styles={marks.get(verseKey(v.book, v.chapter, v.verse))}
               />
             ))}
           </div>
         </section>
       ) : !book ? (
         <section className="flex flex-col gap-3">
-          <p className="text-sm font-medium">Choose a book</p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {BIBLE_BOOKS.map((b) => (
-              <button
-                key={b}
-                onClick={() => {
-                  setBook(b);
-                  setChapter(null);
-                }}
-                className="rounded-lg border border-sage-300 px-3 py-2 text-sm transition hover:bg-sage-50"
-              >
-                {b}
-              </button>
-            ))}
-          </div>
+          {/* The canon's two halves, labelled. A flat list of 66 names hides
+              the single most basic fact about the Bible's structure, and
+              someone looking for Matthew shouldn't have to know it is the
+              40th book to find where the New Testament starts. */}
+          {[
+            ["Old Testament", OLD_TESTAMENT_BOOKS],
+            ["New Testament", NEW_TESTAMENT_BOOKS],
+          ].map(([label, books]) => (
+            <div key={label as string} className="flex flex-col gap-3">
+              <div className="flex items-center gap-3">
+                <p className="text-sm font-semibold text-sage-700">
+                  {label as string}
+                </p>
+                <span className="text-xs text-sage-400">
+                  {(books as string[]).length} books
+                </span>
+                <span className="h-px flex-1 bg-sage-200" />
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {(books as string[]).map((b) => (
+                  <button
+                    key={b}
+                    onClick={() => {
+                      setBook(b);
+                      setChapter(null);
+                    }}
+                    className="rounded-lg border border-sage-300 px-3 py-2 text-sm transition hover:bg-sage-50"
+                  >
+                    {b}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
         </section>
       ) : !chapter ? (
         <section className="flex flex-col gap-3">
@@ -438,6 +696,7 @@ export default function BiblePage() {
                   selected={selected.has(v.id)}
                   onToggle={toggle}
                   scale={textScale}
+                  styles={marks.get(verseKey(v.book, v.chapter, v.verse))}
                 />
               ))}
             </div>
@@ -476,6 +735,33 @@ export default function BiblePage() {
           className="fixed inset-x-0 bottom-0 border-t border-sage-200 bg-white/95 backdrop-blur"
           style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}
         >
+          {/* Marking row above the actions: these are the quick, repeated
+              gestures while studying, and they should not be crowded in
+              beside the two buttons that navigate away. */}
+          <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-2 px-4 pt-3">
+            {MARK_STYLES.map((m) => {
+              const chosen = [...selected.values()];
+              const active =
+                chosen.length > 0 &&
+                chosen.every((v) =>
+                  marks.get(verseKey(v.book, v.chapter, v.verse))?.has(m.id)
+                );
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => toggleMark(m.id)}
+                  className={`rounded-full border px-3 py-1.5 text-xs transition ${
+                    active
+                      ? "border-sage-600 bg-sage-600 text-white"
+                      : "border-sage-300 hover:bg-sage-50"
+                  }`}
+                >
+                  <span aria-hidden className="mr-1">{m.icon}</span>
+                  {m.label}
+                </button>
+              );
+            })}
+          </div>
           <div className="mx-auto flex w-full max-w-3xl items-center gap-3 px-4 pt-3">
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">
@@ -493,6 +779,13 @@ export default function BiblePage() {
               className="text-sm text-sage-500 underline"
             >
               Clear
+            </button>
+            <button
+              onClick={explainSelection}
+              disabled={explaining}
+              className="shrink-0 rounded-full border border-sage-400 px-3 py-2 text-sm transition hover:bg-sage-50 disabled:opacity-50"
+            >
+              {explaining ? "…" : "Explain"}
             </button>
             <button
               onClick={makePrayerVideo}
@@ -513,27 +806,47 @@ function VerseRow({
   onToggle,
   showReference = false,
   scale = 1,
+  styles,
 }: {
   verse: BibleVerse;
   selected: boolean;
   onToggle: (v: BibleVerse) => void;
   showReference?: boolean;
   scale?: number;
+  styles?: Set<MarkStyle>;
 }) {
+  // A verse can carry several marks at once, so these compose rather than
+  // pick one. Highlight is a background, bold and underline are type
+  // treatments, and a bookmark shows as a tab in the margin — none of them
+  // conflict, and a reader who has used all four should see all four.
+  const highlighted = styles?.has("highlight");
+  const bookmarked = styles?.has("bookmark");
   return (
     <button
       onClick={() => onToggle(verse)}
-      className={`rounded-lg border px-4 py-3 text-left transition ${
+      className={`relative rounded-lg border px-4 py-3 text-left transition ${
         selected
           ? "border-sage-600 bg-sage-50"
-          : "border-transparent hover:bg-sage-50"
+          : highlighted
+            ? "border-transparent bg-amber-100 hover:bg-amber-200"
+            : "border-transparent hover:bg-sage-50"
       }`}
     >
+      {bookmarked && (
+        <span
+          aria-label="Bookmarked"
+          className="absolute right-2 top-2 text-xs"
+        >
+          🔖
+        </span>
+      )}
       {/* Scaled from the 14px base rather than swapping Tailwind classes, so
           the magnifier can offer in-between steps and the verse-number and
           body text grow together. */}
       <span
-        className="leading-relaxed"
+        className={`leading-relaxed ${styles?.has("bold") ? "font-semibold" : ""} ${
+          styles?.has("underline") ? "underline decoration-sage-500 underline-offset-4" : ""
+        }`}
         style={{ fontSize: `${14 * scale}px` }}
       >
         <span className="mr-2 font-semibold text-sage-500">

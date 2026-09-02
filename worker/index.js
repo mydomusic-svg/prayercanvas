@@ -627,38 +627,83 @@ async function renderPrayer(job, workDir) {
   // iMessage, Photos, or any other app from an early video frame, completely
   // outside our control — show the full prayer text "at rest" instead of a
   // blank background frame, matching the in-app thumbnail's look.
-  // SCRIPTURE IS SET LARGER THAN A SPOKEN PRAYER.
+  // FITTING THE WHOLE PRAYER ON SCREEN.
   //
-  // A verse is meant to be READ off the screen, often by someone holding a
-  // phone at arm's length, and it is usually short. A recorded prayer's
-  // transcript is longer and is being heard rather than read, so the text
-  // is really there as a caption. Different jobs, different sizes.
+  // This used to truncate at 260 characters, so a long passage was cut off
+  // mid-sentence on screen while the captions went on reading the rest of
+  // it — the video contradicted itself. Nothing is dropped now: the text is
+  // fitted, and if it genuinely cannot fit at a readable size it is paged.
   //
-  // The size only steps up when the passage is genuinely short, because
-  // bigger type in the same space means fewer characters fit: at 52px on a
-  // 21-character wrap, much past ~200 characters starts running off the
-  // bottom of the frame. Longer passages keep the standard size, which is
-  // still perfectly readable — better a slightly smaller verse than one
-  // whose last line is missing.
+  // Two measurements drive this, both taken against real scripture rendered
+  // in the actual font rather than estimated:
+  //
+  //   charsPerLine — 2050/fontSize. Playfair Bold fits 35 characters per
+  //   line at 58px, 44 at 46px, 69 at 30px, all inside a 980px text column
+  //   (1080 frame less a 50px margin each side). The previous values (17
+  //   and 22) were calibrated against a line of capital Ws, which is the
+  //   theoretical worst case and nothing anybody ever writes — real prose
+  //   was using less than half the frame width and running out of lines
+  //   twice as fast as it needed to.
+  //
+  //   lineHeight — fontSize * 1.2 plus the 20px line_spacing the drawtext
+  //   filter is given below.
+  //
+  // The vertical budget runs from the text's top edge down to where the
+  // captions begin (h-380), less a margin, so the body can never collide
+  // with them.
   const scriptureReference = prayer.scripture_reference ?? null;
-  const bodyText = prayer.transcript ?? "";
-  const bigScripture = Boolean(scriptureReference) && bodyText.length <= 200;
-  // Sizes stepped up (40 -> 46, scripture 52 -> 58) and the wrap pulled in
-  // to match. The wrap numbers are not proportional guesses: bold Playfair
-  // is about 6% wider per character than the regular weight on top of the
-  // size increase, and the measured worst-case line has to stay inside
-  // 1080px minus a comfortable margin. Both were checked by rendering the
-  // widest line each can produce (22 capital Ws at 46px measures 990px; 17
-  // at 58px measures 953px) — 18 characters at the scripture size came out
-  // at 1009px, leaving only 35px of margin, so it was pulled in by one.
-  const bodyFontSize = bigScripture ? 58 : 46;
-  const bodyWrapChars = bigScripture ? 17 : 22;
+  const bodyText = (prayer.transcript ?? "").trim();
 
-  const openingBodyPath = path.join(workDir, "opening-body.txt");
-  await writeFile(
-    openingBodyPath,
-    wrapText(truncateForThumbnail(bodyText, bigScripture ? 200 : 260), bodyWrapChars),
-    "utf8"
+  const BODY_TOP = 560;
+  const BODY_BOTTOM = 1500;
+  const BODY_HEIGHT = BODY_BOTTOM - BODY_TOP;
+  const charsPerLine = (size) => Math.floor(2050 / size);
+  const lineHeight = (size) => size * 1.2 + 20;
+
+  // Largest first: a short prayer should be big and confident, and only a
+  // long one should step down. The floor of 30px is where text stops being
+  // comfortably readable on a phone; below that, paging is the better
+  // trade than shrinking further.
+  const SIZE_LADDER = scriptureReference
+    ? [58, 52, 46, 42, 38, 34, 30]
+    : [46, 42, 38, 34, 30];
+
+  let bodyFontSize = SIZE_LADDER[SIZE_LADDER.length - 1];
+  let bodyLines = wrapText(bodyText, charsPerLine(bodyFontSize)).split("\n");
+  let linesPerPage = Math.max(1, Math.floor(BODY_HEIGHT / lineHeight(bodyFontSize)));
+
+  for (const size of SIZE_LADDER) {
+    const lines = wrapText(bodyText, charsPerLine(size)).split("\n");
+    const fits = Math.floor(BODY_HEIGHT / lineHeight(size));
+    if (lines.length <= fits) {
+      bodyFontSize = size;
+      bodyLines = lines;
+      linesPerPage = Math.max(1, fits);
+      break;
+    }
+    // Nothing fit on one page — keep the smallest rung's wrapping, which is
+    // what the paging below will use.
+    bodyFontSize = size;
+    bodyLines = lines;
+    linesPerPage = Math.max(1, fits);
+  }
+
+  // Split into pages. Almost always exactly one.
+  const bodyPageTexts = [];
+  for (let i = 0; i < bodyLines.length; i += linesPerPage) {
+    bodyPageTexts.push(bodyLines.slice(i, i + linesPerPage).join("\n"));
+  }
+  if (bodyPageTexts.length === 0) bodyPageTexts.push("");
+
+  const bodyPages = [];
+  for (let i = 0; i < bodyPageTexts.length; i++) {
+    const pagePath = path.join(workDir, `body-page-${i}.txt`);
+    await writeFile(pagePath, bodyPageTexts[i], "utf8");
+    bodyPages.push({ path: pagePath });
+  }
+  console.log(
+    `Prayer text: ${bodyText.length} chars -> ${bodyLines.length} line(s) at ` +
+      `${bodyFontSize}px, ${bodyPages.length} page(s).`
   );
 
   // The citation goes to its own file for the same reason every other burned
@@ -771,8 +816,9 @@ async function renderPrayer(job, workDir) {
     accentColor,
     titlePath,
     titleLineCount,
-    openingBodyPath,
+    bodyPages,
     bodyFontSize,
+    videoDuration: duration,
     scriptureRefPath,
     captionFiles,
     wordFiles,
@@ -1293,8 +1339,9 @@ function buildFilterComplex({
   accentColor,
   titlePath,
   titleLineCount = 1,
-  openingBodyPath,
-  bodyFontSize = 40,
+  bodyPages = [],
+  bodyFontSize = 46,
+  videoDuration = 0,
   scriptureRefPath = null,
   captionFiles,
   wordFiles = [],
@@ -1349,7 +1396,7 @@ function buildFilterComplex({
   // file leaves the app) shows the full prayer text "at rest" instead of
   // just the bare background, matching what the in-app thumbnail looks
   // like — that's still true at t=0 since the card is always on now.
-  if (openingBodyPath) {
+  if (bodyPages.length > 0) {
     // Used to sit on a solid drawbox "card" (a big semi-transparent
     // rectangle) for contrast — that read as a gray/black bar smothering
     // half the photo. Replaced with the same treatment the title above
@@ -1367,13 +1414,50 @@ function buildFilterComplex({
     const bodyY = cardTop + 100;
 
     const bodyBorderColor = theme.text === "black" ? "white@0.85" : "black@0.6";
-    nextLabel = "vcard2";
-    filters.push(
-      `[${currentLabel}]drawtext=textfile='${openingBodyPath}':fontfile='${FONT_SERIF_BOLD}':fontsize=${bodyFontSize}:fontcolor=${theme.text}:` +
-        `bordercolor=${bodyBorderColor}:borderw=2:shadowcolor=black@0.35:shadowx=2:shadowy=2:` +
-        `line_spacing=20:x=(w-text_w)/2:y=${bodyY}[${nextLabel}]`
-    );
-    currentLabel = nextLabel;
+
+    // PAGING A LONG PRAYER.
+    //
+    // One page is the overwhelmingly common case and behaves exactly as
+    // before: drawn for the whole video, no enable clause, so the very
+    // first frame already carries the text (which is what iMessage, Photos
+    // and everything else generate their poster frame from).
+    //
+    // With more than one page they take equal turns across the video —
+    // except that the FIRST page comes back for the last stretch. A video
+    // freezes on its final frame when it stops, and freezing on page three
+    // of a passage leaves the viewer looking at the middle of a sentence
+    // with no way back to the start. Ending where it began means the still
+    // image left on screen is the opening of the prayer.
+    //
+    // The tail is 2.5s, or a third of the video if that is shorter, so a
+    // brief prayer doesn't spend most of itself on the reprise.
+    const pageCount = bodyPages.length;
+    const tail = pageCount > 1 ? Math.min(2.5, videoDuration / 3) : 0;
+    const pagedSpan = videoDuration - tail;
+    const perPage = pagedSpan / pageCount;
+
+    bodyPages.forEach((page, i) => {
+      let enable = "";
+      if (pageCount > 1) {
+        const from = (i * perPage).toFixed(2);
+        // The last page runs to the end of the paged span; every other one
+        // stops where the next begins.
+        const to = (i === pageCount - 1 ? pagedSpan : (i + 1) * perPage).toFixed(2);
+        // ffmpeg treats + as OR here, so page 1 gets a second window at the
+        // end without needing a separate drawtext.
+        enable =
+          i === 0
+            ? `:enable='between(t,${from},${to})+between(t,${pagedSpan.toFixed(2)},${videoDuration.toFixed(2)})'`
+            : `:enable='between(t,${from},${to})'`;
+      }
+      nextLabel = `vbody${i}`;
+      filters.push(
+        `[${currentLabel}]drawtext=textfile='${page.path}':fontfile='${FONT_SERIF_BOLD}':fontsize=${bodyFontSize}:fontcolor=${theme.text}:` +
+          `bordercolor=${bodyBorderColor}:borderw=2:shadowcolor=black@0.35:shadowx=2:shadowy=2:` +
+          `line_spacing=20:x=(w-text_w)/2:y=${bodyY}${enable}[${nextLabel}]`
+      );
+      currentLabel = nextLabel;
+    });
   }
 
   } // end !cartoonMode — title and prayer-text card are suppressed above,
@@ -1569,10 +1653,17 @@ function buildFilterComplex({
   // the Docker image's ffmpeg build (afreeverb) simply are not. aecho is
   // known-present here because it is already in use.
   //
-  // out_gain MUST stay 1 on both stages — see the caution above.
+  // out_gain MUST stay 1 on both stages — see the caution above. Wetness is
+  // set by the DECAYS, which is the only safe knob here.
+  //
+  // Decays raised across both stages. Measured with an impulse: reverb tail
+  // energy relative to the direct signal goes 0.049 -> 0.122 (about 2.5x
+  // more reverb), with the audible tail extending 133ms -> 144ms. Still a
+  // small room rather than a hall — long tails smear consonants, and this
+  // has to stay intelligible on a phone speaker.
   const voiceReverb =
-    `aecho=in_gain=1:out_gain=1:delays=11|17|23|31:decays=0.12|0.09|0.07|0.05,` +
-    `aecho=in_gain=1:out_gain=1:delays=53|71|97|131:decays=0.10|0.07|0.05|0.03`;
+    `aecho=in_gain=1:out_gain=1:delays=11|17|23|31:decays=0.18|0.14|0.10|0.07,` +
+    `aecho=in_gain=1:out_gain=1:delays=53|71|97|131:decays=0.16|0.12|0.09|0.06`;
 
   filters.push(
     `[${voiceSource}]${voiceEq},${voiceCompression},${voiceReverb}[voice_proc]`
@@ -1586,7 +1677,20 @@ function buildFilterComplex({
     if (silentPrayer) {
       filters.push(`[voice_proc]anull[voice]`);
     } else {
-      filters.push(`[voice_proc]asplit=2[voice][voice_sc]`);
+      // VOICE +1 dB OVER THE MUSIC.
+      //
+      // The gain goes on the AUDIBLE branch only, not on the sidechain key.
+      // Raising the key too would make the ducking trigger harder, which
+      // changes how much the music dips rather than how loud the voice is —
+      // two different things, and only one of them was asked for.
+      //
+      // Headroom checked before doing this: the voice chain (with its
+      // compressor makeup gain) peaks at -11.7 dB on a quiet input and
+      // -9.1 dB on a loud one, against a limiter set at -0.26 dB. There is
+      // 9-12 dB of room, so +1 dB is real gain rather than something the
+      // limiter immediately eats back.
+      filters.push(`[voice_proc]asplit=2[voice_dry][voice_sc]`);
+      filters.push(`[voice_dry]volume=1.122[voice]`);
     }
     // Base music level raised from 0.22 -> 0.5, and the sidechain duck eased
     // (ratio 10 -> 4, threshold 0.03 -> 0.06, release 400 -> 600) after users
