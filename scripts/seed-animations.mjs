@@ -49,6 +49,10 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 
 const BUCKET = "style-assets";
 const DRY_RUN = process.argv.includes("--dry-run");
+// Reframing only the characters is the common case now — the 13 style
+// clips are unchanged, and re-uploading them burns storage this project is
+// already over quota on.
+const CHARACTERS_ONLY = process.argv.includes("--characters-only");
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 // Clips that animate an existing cartoon character (0015/0017). The still
@@ -118,32 +122,53 @@ const VERTICAL_LETTERBOX =
   "unsharp=5:5:0.6:5:5:0.0";
 
 // CHARACTER CLIPS — a single centred character on a plain or softly
-// gradient background. Measured subject extents across the four clips run
-// from 30% to 88% of the width, so 10% off each side is the most that can
-// come off without clipping the squirrel's tail; that is exactly what is
-// trimmed here.
+// gradient background.
 //
-// Two details that matter:
+// The earlier pass put a FITTED copy of the clip over a heavily blurred,
+// zoomed copy of itself. In a real render that read exactly as what it was:
+// a small sharp picture stuck in the middle of a smear, with a hard seam
+// where one met the other, and the character occupying barely a third of
+// the screen.
 //
-//   - sigma=60 (vs 28 above). These backgrounds are near-flat, so blurring
-//     that hard collapses the zoomed copy to essentially the clip's own
-//     background colour. The bands stop reading as a smeared duplicate of
-//     the character's face and start reading as the backdrop simply
-//     continuing past the edges of the shot.
-//   - the -150 vertical offset lifts the character above centre, which
-//     clears the caption band at y=h-380. Cartoon videos carry captions
-//     now, and a character sitting dead centre collides with them.
+// A 16:9 source cannot be made to fill a 9:16 frame — the aspect ratios are
+// off by 3.16x, and cropping hard enough to fill would keep only the middle
+// 32% of the width, which decapitates every one of these characters. So the
+// bands are unavoidable. The fix is to make them stop looking like bands.
 //
-// unsharp recovers the edge definition lost to the ~2.5x upscale from 480p.
-// That would wreck a photograph; these are flat cartoon renders with almost
-// no fine detail to lose, so they take it well.
+// Three things do that:
+//
+//   - THE BACKDROP IS THE CLIP'S OWN TOP EDGE, stretched down the whole
+//     frame. These backgrounds are flat or gently graded, so the top row is
+//     essentially the backdrop colour; stretching it continues the backdrop
+//     past the top of the shot instead of smearing the character's face
+//     across it. On the flat purple and teal clips the join is invisible.
+//   - IT IS BUILT FROM THE SAME CROP as the character layer, not from the
+//     raw frame. Sampling the full width and then squeezing it to 1080
+//     compresses the backdrop's horizontal gradient differently from the
+//     character layer's, and that mismatch is itself a visible seam.
+//   - THE CHARACTER SITS FLUSH TO THE BOTTOM, so there is no bottom seam at
+//     all: the body runs off the bottom of the video exactly as it runs off
+//     the bottom of the source. Only one join exists, at the top, and that
+//     one is in clean background.
+//
+// With no seam to hide, the character can finally be scaled up. 1500 (vs
+// the frame's 1080) is the most it takes before the squirrel's tail starts
+// leaving the frame, and it lifts the character from ~40% of the height to
+// ~70%. sigma=8, not 60: the backdrop is one stretched row, so it needs
+// only enough blur to kill sensor noise — blurring harder would drift its
+// colour away from the row it has to match.
+const CHARACTER_ZOOM = 1500;
+const CHARACTER_CHAIN =
+  "crop=trunc(iw*0.80/2)*2:ih:trunc(iw*0.10/2)*2:0," +
+  `scale=${CHARACTER_ZOOM}:-2`;
+
 const VERTICAL_FILL =
-  "split=2[bg][fg];" +
-  "[bg]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920," +
-  "gblur=sigma=60,eq=brightness=-0.03[bgb];" +
-  "[fg]crop=trunc(iw*0.80/2)*2:ih:trunc(iw*0.10/2)*2:0,scale=1080:-2," +
+  "split=2[a][b];" +
+  `[a]${CHARACTER_CHAIN},crop=1080:ih:(iw-1080)/2:0,` +
   "unsharp=5:5:0.8:5:5:0.0[fgs];" +
-  "[bgb][fgs]overlay=(W-w)/2:(H-h)/2-150";
+  `[b]${CHARACTER_CHAIN},crop=1080:4:(iw-1080)/2:0,` +
+  "scale=1080:1920,gblur=sigma=8[bgb];" +
+  "[bgb][fgs]overlay=0:H-h";
 
 function slug(name) {
   return name
@@ -242,7 +267,9 @@ async function main() {
       }
     }
 
-    for (const [file, [name, category]] of Object.entries(STYLE_CLIPS)) {
+    for (const [file, [name, category]] of CHARACTERS_ONLY
+      ? []
+      : Object.entries(STYLE_CLIPS)) {
       const src = path.join(folder, file);
       const out = path.join(workDir, `${slug(name)}.mp4`);
       try {

@@ -22,11 +22,20 @@ export type OpenAiVoice =
  * rather than spoken. 0.85 brings it to roughly 170wpm, close to how
  * someone actually prays aloud, and gives the words room to land.
  *
- * Cartoon characters override this — their whole appeal is being lively,
- * and slowing them down makes them sound sedated rather than funny.
+ * Cartoon characters used to override this and read at 1.0, on the theory
+ * that a slowed-down duck sounds sedated rather than funny. That was
+ * written for jokey one-line prayers, and it is wrong now that a character
+ * can be handed a Bible verse: "O give thanks unto the LORD; for he is
+ * good: for his mercy endureth for ever" arrived in FOUR SECONDS — about
+ * 3.4 words a second, half again faster than anyone reads scripture aloud.
+ * It sounded gabbled, not lively.
+ *
+ * What makes these voices funny is the pitch shift and the vibrato the
+ * worker layers on (VOICE_EFFECTS), not the rate. So they read at the same
+ * unhurried pace as the narrator now, and stay just as silly.
  */
 export const NARRATION_SPEED = 0.85;
-export const CARTOON_SPEED = 1.0;
+export const CARTOON_SPEED = 0.85;
 
 /**
  * Synthesizes speech for the Funny Cartoon category: reads `text` aloud in

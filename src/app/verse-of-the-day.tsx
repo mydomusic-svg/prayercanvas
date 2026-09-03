@@ -10,6 +10,7 @@ import {
   type BibleVerse,
   type BibleTranslation,
 } from "@/lib/bible";
+import VerseBanner from "./verse-banner";
 
 /**
  * Today's verse, with one tap to turn it into a prayer.
@@ -48,6 +49,7 @@ export default function VerseOfTheDay({
 
   const [verses, setVerses] = useState<BibleVerse[] | null>(null);
   const [reference, setReference] = useState<string>("");
+  const [theme, setTheme] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -63,7 +65,7 @@ export default function VerseOfTheDay({
 
       const { data: pick } = await supabase
         .from("verse_of_the_day")
-        .select("book, chapter, verse_start, verse_end")
+        .select("book, chapter, verse_start, verse_end, theme")
         .eq("position", positionForToday(count))
         .maybeSingle();
       if (!pick) {
@@ -91,6 +93,7 @@ export default function VerseOfTheDay({
       }
       setVerses(found);
       setReference(formatCitation(found, translation));
+      setTheme((pick.theme as string | null) ?? null);
     })();
     return () => {
       cancelled = true;
@@ -120,21 +123,32 @@ export default function VerseOfTheDay({
 
   if (!verses) {
     return (
-      <section className="rounded-xl border border-sage-200 bg-white/60 p-5">
-        <p className="text-xs font-medium uppercase tracking-wide text-sage-500">
-          Today&apos;s verse
-        </p>
-        <div className="mt-3 h-4 w-3/4 animate-pulse rounded bg-sage-100" />
-        <div className="mt-2 h-4 w-1/2 animate-pulse rounded bg-sage-100" />
+      <section className="overflow-hidden rounded-xl border border-sage-200 bg-white/60">
+        {/* Same height as the real banner, so the card does not jump when
+            the verse arrives. */}
+        <div className="h-28 animate-pulse bg-sage-100 sm:h-36" />
+        <div className="p-5">
+          <p className="text-xs font-medium uppercase tracking-wide text-sage-500">
+            Today&apos;s verse
+          </p>
+          <div className="mt-3 h-4 w-3/4 animate-pulse rounded bg-sage-100" />
+          <div className="mt-2 h-4 w-1/2 animate-pulse rounded bg-sage-100" />
+        </div>
       </section>
     );
   }
 
   return (
-    <section className="flex flex-col gap-4 rounded-xl border border-sage-200 bg-white/70 p-5">
-      <p className="text-xs font-medium uppercase tracking-wide text-sage-500">
-        Today&apos;s verse
-      </p>
+    <section className="overflow-hidden rounded-xl border border-sage-200 bg-white/70">
+      {/* The label sits ON the banner rather than above it — the banner is
+          the card's header, not a decoration stacked in front of one. */}
+      <div className="relative">
+        <VerseBanner theme={theme} />
+        <p className="absolute left-5 top-4 text-xs font-semibold uppercase tracking-wide text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.55)]">
+          Today&apos;s verse
+        </p>
+      </div>
+      <div className="flex flex-col gap-4 p-5">
       <blockquote className="font-headline text-xl leading-relaxed text-sage-900">
         {verses.map((v) => v.text.trim()).join(" ")}
       </blockquote>
@@ -152,6 +166,7 @@ export default function VerseOfTheDay({
         >
           Read it in context
         </button>
+      </div>
       </div>
     </section>
   );

@@ -305,8 +305,8 @@ export async function POST(
           throw characterError ?? new Error("Cartoon character not found");
         }
 
-        // Characters stay at full speed — a slowed-down duck is not funny,
-        // it just sounds sedated. Only the plain narrator is calmed down.
+        // Same unhurried pace as the narrator: the pitch effect is what
+        // makes the character funny, not the speed (see tts.ts).
         const cartoonAudioBuffer = await synthesizeSpeech(
           transcript,
           character.openai_voice as OpenAiVoice,
