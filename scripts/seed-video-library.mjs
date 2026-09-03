@@ -20,9 +20,16 @@
 // your Mac) — same restriction documented in seed-music-styles.mjs.
 
 import { createClient } from "@supabase/supabase-js";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import {
+  ensureFfmpeg,
+  encodeForRender,
+  uploadToBucket,
+  MB,
+  TARGET_SECONDS,
+} from "./lib/ingest.mjs";
 
 const SUPABASE_URL =
   process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -48,13 +55,33 @@ const BUCKET = "style-assets";
 // results). Tune freely — this is meant to be edited and re-run over time
 // as the library grows.
 const CATEGORIES = {
+  // Flowers is its own category rather than a corner of Nature: someone
+  // who wants roses behind a prayer is not browsing for "nature", and the
+  // picker chooses a random clip within whichever category is selected —
+  // so burying roses among waterfalls means mostly not getting roses.
+  Flowers: [
+    "roses",
+    "rose petals falling",
+    "flower field wind",
+    "cherry blossom",
+    "sunflower field",
+    "lavender field",
+    "tulips",
+    "white flowers close up",
+    "wildflowers meadow",
+  ],
   Nature: [
     "forest stream",
     "ocean waves",
     "mountain sunrise",
     "rain on leaves",
     "waterfall",
+    "tropical waterfall",
+    "waterfall rainforest",
+    "cascade rocks",
     "meadow wind",
+    "sunlight through trees",
+    "autumn leaves falling",
   ],
   Cinematic: [
     "storm clouds",
@@ -149,17 +176,6 @@ async function downloadTo(url, destPath, maxBytes) {
   await writeFile(destPath, buffer);
   return buffer.byteLength;
 }
-
-async function uploadToStorage(localPath, storagePath, contentType) {
-  const data = await readFile(localPath);
-  const { error } = await supabase.storage
-    .from(BUCKET)
-    .upload(storagePath, data, { contentType, upsert: true });
-  if (error) throw new Error(`Upload failed for ${storagePath}: ${error.message}`);
-  const { data: publicUrlData } = supabase.storage.from(BUCKET).getPublicUrl(storagePath);
-  return publicUrlData.publicUrl;
-}
-
 // Optional: node scripts/seed-video-library.mjs --limit=5 imports only N
 // new clips total (across all categories) then exits — useful for running
 // in short bursts. Safe to re-run repeatedly; already-imported Pexels ids
@@ -168,6 +184,7 @@ const limitArg = process.argv.find((a) => a.startsWith("--limit="));
 const GLOBAL_LIMIT = limitArg ? parseInt(limitArg.split("=")[1], 10) : Infinity;
 
 async function main() {
+  await ensureFfmpeg();
   const workDir = await mkdtemp(path.join(tmpdir(), "video-library-"));
   console.log(`Working in ${workDir}`);
 
@@ -233,8 +250,21 @@ async function main() {
         if (lastErr) throw new Error("all resolutions too large for Storage's upload limit");
         console.log(`    size: ${(bytes / 1024 / 1024).toFixed(1)} MB`);
 
+        // Encode to what the renderer actually uses BEFORE uploading. The
+        // first version of this script stored the source file untouched,
+        // which is how style-assets reached 540MB on a 1GB tier — the
+        // worker crops every background to 1080x1920, never reads its
+        // audio, and loops anything past ~12s. See scripts/lib/ingest.mjs.
+        const encodedPath = path.join(workDir, `pexels-${video.id}-enc.mp4`);
+        const encodedBytes = await encodeForRender(localPath, encodedPath, {
+          seconds: TARGET_SECONDS,
+        });
+        console.log(`    encoded: ${MB(bytes)} -> ${MB(encodedBytes)}`);
+
         const storagePath = `videos/pexels-${video.id}.mp4`;
-        const visualUrl = await uploadToStorage(localPath, storagePath, "video/mp4");
+        const visualUrl = await uploadToBucket(
+          supabase, BUCKET, encodedPath, storagePath
+        );
 
         const name = `${category} — ${query}`;
         const { error } = await supabase.from("styles").insert({
