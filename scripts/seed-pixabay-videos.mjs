@@ -46,6 +46,7 @@ import {
   MB,
   TARGET_SECONDS,
 } from "./lib/ingest.mjs";
+import { queryPairs } from "./lib/queries.mjs";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -74,29 +75,7 @@ const flag = (name, fallback) => {
 const DRY_RUN = process.argv.includes("--dry-run");
 const GLOBAL_LIMIT = flag("limit", 20);
 const SECONDS = flag("seconds", TARGET_SECONDS);
-
-// Categories match the ones already in `styles` so these land in the
-// existing picker, plus Flowers, which is new — a rose is not "Nature" to
-// anyone looking for a rose.
-const CATEGORIES = {
-  Flowers: [
-    "roses", "rose petals", "flower field", "blooming flowers",
-    "cherry blossom", "sunflower field", "lavender field", "tulips",
-    "wildflowers meadow", "orchid",
-  ],
-  Nature: [
-    "waterfall", "tropical waterfall", "forest waterfall", "mountain stream",
-    "autumn leaves", "sunlight through trees", "dew on grass",
-  ],
-  Peaceful: [
-    "calm lake sunrise", "misty forest", "gentle river", "sunset over water",
-    "clouds time lapse",
-  ],
-  Cinematic: [
-    "aerial coastline", "northern lights", "starry sky time lapse",
-    "golden hour field",
-  ],
-};
+const PER_QUERY = flag("per-query", 3);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -143,21 +122,21 @@ async function main() {
   let bytesAfter = 0;
   const failed = [];
 
-  outer: for (const [category, queries] of Object.entries(CATEGORIES)) {
-    console.log(`\n=== ${category} ===`);
-    for (const query of queries) {
-      if (imported >= GLOBAL_LIMIT) break outer;
-      let hits;
-      try {
-        hits = await searchPixabay(query);
-      } catch (err) {
-        console.error(`  ${err.message}`);
-        continue;
-      }
-      await sleep(700); // stay well inside 100 req/min
+  outer: for (const [category, query] of queryPairs()) {
+    if (imported >= GLOBAL_LIMIT) break outer;
+    let hits;
+    try {
+      hits = await searchPixabay(query);
+    } catch (err) {
+      console.error(`  ${err.message}`);
+      continue;
+    }
+    await sleep(700); // stay well inside 100 req/min
 
+    {
+      let takenHere = 0;
       for (const hit of hits) {
-        if (imported >= GLOBAL_LIMIT) break outer;
+        if (imported >= GLOBAL_LIMIT || takenHere >= PER_QUERY) break;
         const id = String(hit.id);
         if (existing.has(id)) continue;
         const file = pickFile(hit);
@@ -168,6 +147,7 @@ async function main() {
         if (DRY_RUN) {
           console.log(`  would import pixabay-${id}  ${name}`);
           imported++;
+          takenHere++;
           continue;
         }
         try {
@@ -192,6 +172,7 @@ async function main() {
           if (error) throw new Error(error.message);
 
           imported++;
+          takenHere++;
           console.log(
             `  ${String(imported).padStart(2)}. ${name.padEnd(34).slice(0, 34)} ` +
               `${MB(rawBytes)} -> ${MB(outBytes)}`

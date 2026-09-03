@@ -30,6 +30,7 @@ import {
   MB,
   TARGET_SECONDS,
 } from "./lib/ingest.mjs";
+import { BACKGROUND_QUERIES } from "./lib/queries.mjs";
 
 const SUPABASE_URL =
   process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -49,87 +50,6 @@ if (!PEXELS_API_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 const BUCKET = "style-assets";
-
-// category -> search queries. Multiple queries per category widen the
-// pool Pexels returns (a single query often repeats a handful of top
-// results). Tune freely — this is meant to be edited and re-run over time
-// as the library grows.
-const CATEGORIES = {
-  // Flowers is its own category rather than a corner of Nature: someone
-  // who wants roses behind a prayer is not browsing for "nature", and the
-  // picker chooses a random clip within whichever category is selected —
-  // so burying roses among waterfalls means mostly not getting roses.
-  Flowers: [
-    "roses",
-    "rose petals falling",
-    "flower field wind",
-    "cherry blossom",
-    "sunflower field",
-    "lavender field",
-    "tulips",
-    "white flowers close up",
-    "wildflowers meadow",
-  ],
-  Nature: [
-    "forest stream",
-    "ocean waves",
-    "mountain sunrise",
-    "rain on leaves",
-    "waterfall",
-    "tropical waterfall",
-    "waterfall rainforest",
-    "cascade rocks",
-    "meadow wind",
-    "sunlight through trees",
-    "autumn leaves falling",
-  ],
-  Cinematic: [
-    "storm clouds",
-    "golden hour clouds",
-    "aerial mountains",
-    "light rays forest",
-    "fog mountains",
-    "city lights night",
-  ],
-  Minimal: [
-    "bokeh lights",
-    "soft gradient background",
-    "blurred lights night",
-    "abstract particles",
-  ],
-  Celebration: [
-    "confetti celebration",
-    "sunshine through trees",
-    "balloons sky",
-    "fireworks night",
-  ],
-  Scripture: [
-    "candle flame",
-    "open bible",
-    "praying hands",
-    "church interior",
-    "stained glass window",
-  ],
-  Peaceful: [
-    "sunset clouds",
-    "calm lake",
-    "starry night sky",
-    "gentle waves beach",
-    "misty morning",
-  ],
-  Family: [
-    "family embrace",
-    "holding hands",
-    "family silhouette sunset",
-    "parent child walking",
-  ],
-  Hope: [
-    "sunrise horizon",
-    "light breaking through clouds",
-    "dove flying",
-    "sunbeams clouds",
-  ],
-};
 
 const PER_CATEGORY_LIMIT = 10; // max clips to import per category per run
 const PER_QUERY_RESULTS = 8;
@@ -201,7 +121,7 @@ async function main() {
   let totalImported = 0;
   const failed = [];
 
-  for (const [category, queries] of Object.entries(CATEGORIES)) {
+  for (const [category, queries] of Object.entries(BACKGROUND_QUERIES)) {
     if (totalImported >= GLOBAL_LIMIT) {
       console.log(`\n--limit=${GLOBAL_LIMIT} reached, stopping (re-run to continue).`);
       break;
