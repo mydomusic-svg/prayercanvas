@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import HeroBanner from "../../hero-banner";
 import PrayerVideoPlayer from "../../prayer-video-player";
+import ShareCta from "../../share-cta";
 
 export default async function SharedPrayerPage({
   params,
@@ -91,6 +92,12 @@ export default async function SharedPrayerPage({
           {prayer.transcript}
         </p>
       ) : null}
+
+      {/* Below the prayer, never beside it. This page is the app's only warm
+          introduction to a stranger — they are here because someone who
+          cares about them made them something — and until now it ended
+          after the video. */}
+      <ShareCta />
       </main>
     </>
   );
