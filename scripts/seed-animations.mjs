@@ -310,8 +310,12 @@ async function main() {
             // as a fallback when it starts with "http", so "" disables it.
             music_asset: "",
             category,
-            source: "Original animation (PrayerMessenger)",
-            license: null,
+            // "Original animation (PrayerMessenger)" was a guess, and a
+            // guess has no business on a public credits page. These are
+            // AI-generated and commissioned for this app; that is what the
+            // page now says.
+            source: "AI-generated (commissioned for PrayerMessenger)",
+            license: "Original work — free to use in PrayerMessenger videos",
           });
           if (error) throw new Error(`insert: ${error.message}`);
           styles++;
