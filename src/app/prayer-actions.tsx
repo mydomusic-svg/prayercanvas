@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { getOrCreateShareUrl } from "@/lib/share-link";
 
 // Shared Download / Share / Delete controls for a rendered prayer video —
 // used on both the dashboard library cards and the prayer detail page so
@@ -135,37 +136,55 @@ export default function PrayerActions({
     }
   }
 
-  // Uses the phone/browser's native share sheet — the same one that pops
-  // up sharing a photo from the camera roll — so the user can pick
-  // Messages, Mail, Instagram, WhatsApp, etc. themselves without us
-  // needing a separate integration per app.
+  // SHARE SENDS THE LINK, NOT THE FILE.
+  //
+  // This used to push the mp4 itself through the share sheet, and fall back
+  // to the raw Supabase storage URL. Both were dead ends. A video file
+  // carries nothing but the burned-in watermark — there is nothing to tap —
+  // and the storage URL opens a bare mp4 on a supabase.co domain with no
+  // app around it. Every prayer sent was a person who cared enough to send
+  // it and a recipient with no way back in.
+  //
+  // The /p/<token> page shows the same video, with its poster frame and the
+  // prayer's text, and invites the reader to make one for someone else. So
+  // the recipient loses nothing and gains a door.
+  //
+  // Two other things fall out of it. Pushing a 1-2MB file on every share
+  // was paid egress each time, where a link is bytes. And fetching the file
+  // here bypassed the download meter in handleDownload — Share to yourself,
+  // Save Video, unlimited free downloads — which is now closed, since this
+  // path no longer touches the file at all.
   async function handleShare() {
     if (!videoUrl) return;
     setSharing(true);
     setShareState("idle");
     try {
-      const shareData: ShareData = { title: title || "My Prayer" };
-
-      if (navigator.canShare) {
-        const file = await fetchVideoFile();
-        if (file && navigator.canShare({ files: [file] })) {
-          await navigator.share({ ...shareData, files: [file] });
-          return;
-        }
-      }
-
-      if (navigator.share) {
-        await navigator.share({ ...shareData, url: videoUrl });
+      const url = await getOrCreateShareUrl(supabase, prayerId);
+      if (!url) {
+        setShareState("error");
         return;
       }
 
-      await navigator.clipboard.writeText(videoUrl);
+      // title + url, with no text field. Putting the link in `text` as
+      // well as `url` makes it show up twice in Messages and WhatsApp,
+      // which reads as a bug; every current share target honours `url` on
+      // its own and renders it as a preview card.
+      const shareData: ShareData = { title: title || "A Prayer", url };
+
+      if (navigator.share) {
+        await navigator.share(shareData);
+        return;
+      }
+
+      await navigator.clipboard.writeText(url);
       setShareState("copied");
     } catch (err) {
       // AbortError just means the user closed the share sheet — not an error.
       if (err instanceof Error && err.name === "AbortError") return;
       try {
-        await navigator.clipboard.writeText(videoUrl);
+        const url = await getOrCreateShareUrl(supabase, prayerId);
+        if (!url) throw new Error("no link");
+        await navigator.clipboard.writeText(url);
         setShareState("copied");
       } catch {
         setShareState("error");
@@ -232,7 +251,7 @@ export default function PrayerActions({
               ? "Sharing…"
               : shareState === "copied"
                 ? "Link copied!"
-                : "Share"}
+                : "Send"}
           </button>
         </>
       )}
