@@ -1282,69 +1282,80 @@ function truncateForThumbnail(text, maxChars) {
 // Ranges were chosen by ear against intelligibility: past about 1.5 up or
 // 0.72 down, consonants start dissolving and the prayer stops being
 // followable, which defeats the point.
-// PITCH IS NOT TEMPO, BUT THE EAR CONFUSES THEM.
+// NO PITCH SHIFTING. Three rounds of "still too fast" ended here, and the
+// last one found the real cause: asetrate reinterprets the stream's sample
+// rate rather than scaling pitch, so pointing it at 44100 when tts-1
+// returns 24kHz played every character 1.84x too fast. That is fixed in the
+// filter chain below and the fix stays, because `rate` still uses atempo
+// and anyone re-enabling pitch needs the correct base.
 //
-// The synthesized read is already at the narrator's unhurried 0.85 — I
-// measured a rendered cartoon line at 167 words per minute, the same as a
-// plain narration. It still came back as "too fast", and the reason is that
-// raising pitch raises the formants with it, and a voice with everything
-// shifted up reads as hurried and excited however long it actually takes.
-// The alien's 6Hz tremolo compounds it: a fast amplitude wobble sounds like
-// agitation.
+// But pitch is being retired anyway. What it buys in silliness it costs in
+// sounding rushed — raising pitch raises the formants with it, and a voice
+// shifted up reads as hurried however long it actually takes. Compensating
+// by slowing the tempo to match just trades gabbling for drawling. For a
+// prayer, an ordinary voice beats a comic one that gets the tone wrong.
 //
-// So each effect carries a `rate` — an extra tempo multiplier applied on top
-// of the pitch compensation, roughly inverse to how far up the pitch went.
-// The duck, shifted up 42%, is slowed most; the bear and the grumpy cloud
-// are pitched DOWN, already read as slower than they are, and are left
-// alone. Tuned by ear against the pitch, not by formula.
+// The characters stay distinct through two things that do not touch
+// perceived speed: each has its OWN OpenAI voice (six characters, six
+// voices, in cartoon_characters.openai_voice) and its own EQ shaping. The
+// bear still sits low and warm, the duck still honks in the 1.9kHz band,
+// the grumpy cloud is still dull and flat — they are simply no longer
+// transposed.
+//
+// To bring pitch back for one character, give it a `pitch` other than 1.0;
+// the chain below still supports it, and `rate` is the extra tempo
+// multiplier that keeps it from sounding hurried.
 const VOICE_EFFECTS = {
-  // Nasal and honking: scoop the chest register out, push the 1.5-2.5kHz
-  // "quack" band hard, and wobble it.
+  // Nasal and honking: scoop the chest register out and push the 1.5-2.5kHz
+  // "quack" band hard. The wobble is lighter than it was — without a
+  // transposed voice under it, the old depth read as warble, not character.
   duck: {
-    pitch: 1.42,
-    rate: 0.90,
+    pitch: 1.0,
+    rate: 1.0,
     chain:
-      "equalizer=f=400:width_type=q:w=1.0:g=-5," +
-      "equalizer=f=1900:width_type=q:w=1.1:g=6," +
-      "vibrato=f=6.5:d=0.22",
+      "equalizer=f=400:width_type=q:w=1.0:g=-6," +
+      "equalizer=f=1900:width_type=q:w=1.1:g=7," +
+      "vibrato=f=6.5:d=0.12",
   },
-  // Small, fast and bright, with only a light wobble so it stays clear.
+  // Small and bright: lift the presence band, very little else.
   chipmunk: {
-    pitch: 1.34,
-    rate: 0.92,
-    chain: "equalizer=f=2600:width_type=q:w=1.0:g=3,vibrato=f=5:d=0.10",
+    pitch: 1.0,
+    rate: 1.0,
+    chain: "equalizer=f=2600:width_type=q:w=1.0:g=4,vibrato=f=5:d=0.07",
   },
-  // Bright and airy rather than squeaky — a lighter touch than chipmunk.
+  // Airy rather than squeaky — the lightest touch of the six.
   sparkle: {
-    pitch: 1.22,
-    rate: 0.95,
-    chain: "equalizer=f=3000:width_type=q:w=1.0:g=2.5,vibrato=f=4.5:d=0.08",
+    pitch: 1.0,
+    rate: 1.0,
+    chain: "equalizer=f=3000:width_type=q:w=1.0:g=3,vibrato=f=4.5:d=0.06",
   },
-  // Not-from-here: chorus detunes copies of the voice against itself and
-  // tremolo pulses the level, which reads as "modulated" without touching
-  // the words themselves.
+  // Not-from-here: chorus detunes copies of the voice against itself, which
+  // reads as "modulated" without moving the words. The tremolo is much
+  // gentler than it was — at d=0.35 the level pulsed hard enough to sound
+  // agitated, and that was most of what made this one feel frantic.
   alien: {
-    pitch: 1.16,
-    rate: 0.95,
+    pitch: 1.0,
+    rate: 1.0,
     chain:
-      "chorus=0.6:0.9:50|60:0.4|0.32:0.25|0.4:2|1.3,tremolo=f=6:d=0.35",
+      "chorus=0.6:0.9:50|60:0.4|0.32:0.25|0.4:2|1.3,tremolo=f=5:d=0.18",
   },
-  // Big and rumbling: lift the low end, take the presence band down.
+  // Big and rumbling: lift the low end harder now that the voice is not
+  // being transposed down to get there, and take the presence band off.
   bear: {
-    pitch: 0.78,
+    pitch: 1.0,
     rate: 1.0,
     chain:
-      "equalizer=f=140:width_type=q:w=1.0:g=4," +
-      "equalizer=f=2500:width_type=q:w=1.0:g=-2",
+      "equalizer=f=140:width_type=q:w=1.0:g=6," +
+      "equalizer=f=2500:width_type=q:w=1.0:g=-3",
   },
-  // Deadpan and dry — lowered a little, presence dulled, no movement at
-  // all. The joke is that it refuses to be excited.
+  // Deadpan and dry — presence dulled, no movement at all. The joke is
+  // that it refuses to be excited.
   grumpy: {
-    pitch: 0.86,
+    pitch: 1.0,
     rate: 1.0,
     chain:
-      "equalizer=f=180:width_type=q:w=1.0:g=3," +
-      "equalizer=f=3000:width_type=q:w=1.2:g=-3",
+      "equalizer=f=180:width_type=q:w=1.0:g=4," +
+      "equalizer=f=3000:width_type=q:w=1.2:g=-4",
   },
 };
 
