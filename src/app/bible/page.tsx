@@ -64,6 +64,10 @@ export default function BiblePage() {
   const [commentary, setCommentary] = useState<string | null>(null);
   const [commentaryRef, setCommentaryRef] = useState<string | null>(null);
   const [explaining, setExplaining] = useState(false);
+  // Which mark is mid-save. Without this a tap on a phone does nothing
+  // visible until the round trip finishes, which reads as an ignored tap
+  // and invites a second one.
+  const [markPending, setMarkPending] = useState<MarkStyle | null>(null);
 
   // Topics: the curated bridge from a feeling to a passage. Loaded once —
   // eighteen rows, and every search has to check them before falling through
@@ -430,6 +434,15 @@ export default function BiblePage() {
   async function toggleMark(style: MarkStyle) {
     const chosen = [...selected.values()];
     if (chosen.length === 0) return;
+    setMarkPending(style);
+    try {
+      await applyMark(style, chosen);
+    } finally {
+      setMarkPending(null);
+    }
+  }
+
+  async function applyMark(style: MarkStyle, chosen: BibleVerse[]) {
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -474,6 +487,7 @@ export default function BiblePage() {
     await loadMarks();
     if (bookmarks !== null) await openBookmarks();
   }
+
 
   async function openBookmarks() {
     const { data: rows } = await supabase
@@ -1198,14 +1212,19 @@ export default function BiblePage() {
                 <button
                   key={m.id}
                   onClick={() => toggleMark(m.id)}
-                  className={`rounded-full border px-3 py-1.5 text-xs transition ${
+                  disabled={markPending !== null}
+                  // px-4/py-2.5 on phones lifts these to roughly a 40px
+                  // target; iOS guidance is 44pt and these were about 26.
+                  // They are the buttons someone is reaching for one-handed
+                  // while reading, and they shrink back on a mouse.
+                  className={`rounded-full border px-4 py-2.5 text-sm transition disabled:opacity-60 sm:px-3 sm:py-1.5 sm:text-xs ${
                     active
                       ? "border-sage-600 bg-sage-600 text-white"
                       : "border-sage-300 hover:bg-sage-50"
                   }`}
                 >
                   <span aria-hidden className="mr-1">{m.icon}</span>
-                  {m.label}
+                  {markPending === m.id ? "…" : m.label}
                 </button>
               );
             })}
@@ -1215,7 +1234,7 @@ export default function BiblePage() {
             {selectedList.length === 1 && (
               <button
                 onClick={openNoteEditor}
-                className="rounded-full border border-sage-300 px-3 py-1.5 text-xs transition hover:bg-sage-50"
+                className="rounded-full border border-sage-300 px-4 py-2.5 text-sm transition hover:bg-sage-50 sm:px-3 sm:py-1.5 sm:text-xs"
               >
                 <span aria-hidden className="mr-1">✎</span>
                 {notes.has(
@@ -1296,12 +1315,21 @@ function VerseRow({
   return (
     <button
       onClick={() => onToggle(verse)}
+      // SELECTION AND HIGHLIGHT ARE DIFFERENT THINGS and must not compete
+      // for the same property. They used to: selection was checked first
+      // and painted the row sage, so tapping Highlight on a verse that was
+      // still selected — which it always is, since you must select a verse
+      // to reach the button — saved the mark and changed nothing on screen.
+      // It read as a broken button.
+      //
+      // Background now belongs to the highlight, and the border to the
+      // selection, so both can be true at once and both are visible.
       className={`relative rounded-lg border px-4 py-3 text-left transition ${
-        selected
-          ? "border-sage-600 bg-sage-50"
-          : highlighted
-            ? "border-transparent bg-amber-100 hover:bg-amber-200"
-            : "border-transparent hover:bg-sage-50"
+        highlighted ? "bg-amber-100" : selected ? "bg-sage-50" : ""
+      } ${
+        selected ? "border-sage-600" : "border-transparent"
+      } ${
+        highlighted ? "" : "hover:bg-sage-50"
       }`}
     >
       {(bookmarked || hasNote) && (
