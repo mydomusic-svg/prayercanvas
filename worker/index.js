@@ -1348,15 +1348,6 @@ const VOICE_EFFECTS = {
       "equalizer=f=140:width_type=q:w=1.0:g=6," +
       "equalizer=f=2500:width_type=q:w=1.0:g=-3",
   },
-  // Deadpan and dry — presence dulled, no movement at all. The joke is
-  // that it refuses to be excited.
-  grumpy: {
-    pitch: 1.0,
-    rate: 1.0,
-    chain:
-      "equalizer=f=180:width_type=q:w=1.0:g=4," +
-      "equalizer=f=3000:width_type=q:w=1.2:g=-4",
-  },
 };
 
 /**

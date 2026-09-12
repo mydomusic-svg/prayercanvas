@@ -77,14 +77,6 @@ const CHARACTERS = [
     voice_effect: "sparkle",
   },
   {
-    name: "Grumbles the Cloud",
-    prompt:
-      "A cute original cartoon mascot character: a small round grumpy-but-lovable cartoon rain cloud with a deadpan flat expression and one raised eyebrow, simple flat vector illustration style, solid sky-blue background, centered portrait, no text, no logos.",
-    openai_voice: "echo",
-    pitch_ratio: 1.0,
-    voice_effect: "grumpy",
-  },
-  {
     name: "Ziggy the Alien",
     prompt:
       "A cute original cartoon mascot character: a small wacky green cartoon alien with three eyes and antenna, wide silly open-mouthed smile, simple flat vector illustration style, solid deep purple background, centered portrait, no text, no logos.",
