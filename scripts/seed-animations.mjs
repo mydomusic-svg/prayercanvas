@@ -209,10 +209,13 @@ async function upload(storagePath, buffer) {
 }
 
 async function main() {
-  const folder = process.argv[2];
+  // The folder is the first argument that is NOT a flag. Reading argv[2]
+  // blindly meant `--characters-only` was taken as the folder path, and
+  // every clip failed with ENOENT on '--characters-only/bear .mov'.
+  const folder = process.argv.slice(2).find((a) => !a.startsWith("--"));
   if (!folder) {
     console.error(
-      'Usage: node --env-file=.env.local scripts/seed-animations.mjs "/path/to/folder"'
+      'Usage: node --env-file=.env.local scripts/seed-animations.mjs "/path/to/folder" [--characters-only] [--dry-run]'
     );
     process.exit(1);
   }
