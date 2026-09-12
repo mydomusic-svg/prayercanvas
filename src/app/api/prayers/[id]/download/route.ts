@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { FREE_DOWNLOADS_PER_DAY } from "@/lib/plan-limits";
 
 /**
  * Spends one of a free-plan user's daily downloads, or reports that they
@@ -27,7 +28,6 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * commercially; not worth blocking it on today.
  */
 
-const FREE_DOWNLOADS_PER_DAY = 3;
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 
 async function getUsage(userId: string) {

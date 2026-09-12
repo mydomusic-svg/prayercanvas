@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { FREE_VIDEOS_PER_MONTH } from "@/lib/plan-limits";
 import { BIBLE_HANDOFF_KEY } from "@/lib/bible";
 import HeroBanner from "../hero-banner";
 import type {
@@ -1206,8 +1207,9 @@ export default function CreatePrayerPage() {
       {quotaExceeded && (
         <div className="flex flex-col items-center gap-2 rounded-lg border border-sage-300 bg-sage-50 p-4 text-center text-sm text-sage-700">
           <p>
-            You&apos;ve used your 2 free prayer videos this month. Upgrade to
-            PrayerMessenger Plus for unlimited videos, or buy just one more.
+            You&apos;ve used your {FREE_VIDEOS_PER_MONTH} free prayer videos this
+            month. Upgrade to PrayerMessenger Plus for unlimited videos, or buy
+            just one more.
           </p>
           <Link
             href="/pricing"

@@ -1,4 +1,4 @@
--- Free-plan cap: 2 prayer videos per calendar month. Paid plans unlimited.
+-- Free-plan cap: 6 prayer videos per calendar month. Paid plans unlimited.
 --
 -- The client has been ready for this since the create page was written —
 -- it catches an error whose message is exactly 'quota_exceeded' and shows
@@ -57,7 +57,10 @@ security definer
 set search_path = public
 as $$
 declare
-  free_limit constant int := 2;
+  -- Mirrors FREE_VIDEOS_PER_MONTH in src/lib/plan-limits.ts. A trigger
+  -- cannot import a TypeScript constant, so these two are the one pair
+  -- that must be changed together.
+  free_limit constant int := 6;
   user_plan text;
   used int;
 begin

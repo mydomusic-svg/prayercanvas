@@ -79,6 +79,21 @@ export default async function SharedPrayerPage({
           poster={renderJob.thumbnail_url}
           title={displayTitle}
         />
+      ) : renderJob ? (
+        // THE VIDEO EXPIRED, and this page used to say "still being
+        // prepared" — which is untrue, and it is the only page a stranger
+        // ever meets this app on. Free-tier videos are swept a week after
+        // rendering (runRetentionSweep in the worker), so a prayer sent on a
+        // Friday and opened a fortnight later landed here and was told it
+        // was still rendering.
+        //
+        // The words of the prayer are still below, which is the part that
+        // was actually sent. Only the video is gone, and saying so plainly
+        // is better than a message that makes the app look broken.
+        <p className="text-sage-500">
+          The video for this prayer is no longer available — but the prayer
+          itself is here, below.
+        </p>
       ) : (
         <p className="text-sage-500">This prayer is still being prepared.</p>
       )}

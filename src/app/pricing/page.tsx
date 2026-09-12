@@ -1,6 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
 import HeroBanner from "../hero-banner";
 import CheckoutButton from "./checkout-button";
+import {
+  FREE_VIDEOS_PER_MONTH,
+  FREE_DOWNLOADS_PER_DAY,
+  FREE_VIDEO_RETENTION_DAYS,
+} from "@/lib/plan-limits";
 
 export const metadata = { title: "Pricing — PrayerMessenger" };
 
@@ -59,7 +64,7 @@ export default async function PricingPage() {
           {user && (
             <p className="mt-4 text-sm text-sage-500">
               You&apos;re on the {plan === "plus" ? "Plus" : "Free"} plan
-              {plan !== "plus" && ` — ${usedThisMonth} of 2 free videos used this month`}
+              {plan !== "plus" && ` — ${usedThisMonth} of ${FREE_VIDEOS_PER_MONTH} free videos used this month`}
               .
             </p>
           )}
@@ -72,8 +77,10 @@ export default async function PricingPage() {
             </h2>
             <p className="text-3xl font-bold text-sage-900">$0</p>
             <p className="text-sm text-sage-600">
-              2 prayer videos every month, on us. Videos stay available for 24
-              hours and you can download 3 a day — so save the ones you love.
+              {FREE_VIDEOS_PER_MONTH} prayer videos every month, on us. Videos
+              stay available for {FREE_VIDEO_RETENTION_DAYS} days and you can
+              download {FREE_DOWNLOADS_PER_DAY} a day — so save the ones you
+              love.
             </p>
             <p className="mt-auto text-xs text-sage-400">Always free</p>
           </div>
@@ -115,8 +122,8 @@ export default async function PricingPage() {
               $1.49<span className="text-base font-normal text-sage-500">/video</span>
             </p>
             <p className="text-sm text-sage-600">
-              Past your 2 free videos this month? Send one more without
-              subscribing.
+              Past your {FREE_VIDEOS_PER_MONTH} free videos this month? Send one
+              more without subscribing.
             </p>
             <div className="mt-auto">
               <CheckoutButton
