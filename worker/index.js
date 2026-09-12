@@ -1282,11 +1282,27 @@ function truncateForThumbnail(text, maxChars) {
 // Ranges were chosen by ear against intelligibility: past about 1.5 up or
 // 0.72 down, consonants start dissolving and the prayer stops being
 // followable, which defeats the point.
+// PITCH IS NOT TEMPO, BUT THE EAR CONFUSES THEM.
+//
+// The synthesized read is already at the narrator's unhurried 0.85 — I
+// measured a rendered cartoon line at 167 words per minute, the same as a
+// plain narration. It still came back as "too fast", and the reason is that
+// raising pitch raises the formants with it, and a voice with everything
+// shifted up reads as hurried and excited however long it actually takes.
+// The alien's 6Hz tremolo compounds it: a fast amplitude wobble sounds like
+// agitation.
+//
+// So each effect carries a `rate` — an extra tempo multiplier applied on top
+// of the pitch compensation, roughly inverse to how far up the pitch went.
+// The duck, shifted up 42%, is slowed most; the bear and the grumpy cloud
+// are pitched DOWN, already read as slower than they are, and are left
+// alone. Tuned by ear against the pitch, not by formula.
 const VOICE_EFFECTS = {
   // Nasal and honking: scoop the chest register out, push the 1.5-2.5kHz
   // "quack" band hard, and wobble it.
   duck: {
     pitch: 1.42,
+    rate: 0.80,
     chain:
       "equalizer=f=400:width_type=q:w=1.0:g=-5," +
       "equalizer=f=1900:width_type=q:w=1.1:g=6," +
@@ -1295,11 +1311,13 @@ const VOICE_EFFECTS = {
   // Small, fast and bright, with only a light wobble so it stays clear.
   chipmunk: {
     pitch: 1.34,
+    rate: 0.82,
     chain: "equalizer=f=2600:width_type=q:w=1.0:g=3,vibrato=f=5:d=0.10",
   },
   // Bright and airy rather than squeaky — a lighter touch than chipmunk.
   sparkle: {
     pitch: 1.22,
+    rate: 0.86,
     chain: "equalizer=f=3000:width_type=q:w=1.0:g=2.5,vibrato=f=4.5:d=0.08",
   },
   // Not-from-here: chorus detunes copies of the voice against itself and
@@ -1307,12 +1325,14 @@ const VOICE_EFFECTS = {
   // the words themselves.
   alien: {
     pitch: 1.16,
+    rate: 0.88,
     chain:
       "chorus=0.6:0.9:50|60:0.4|0.32:0.25|0.4:2|1.3,tremolo=f=6:d=0.35",
   },
   // Big and rumbling: lift the low end, take the presence band down.
   bear: {
     pitch: 0.78,
+    rate: 1.0,
     chain:
       "equalizer=f=140:width_type=q:w=1.0:g=4," +
       "equalizer=f=2500:width_type=q:w=1.0:g=-2",
@@ -1321,6 +1341,7 @@ const VOICE_EFFECTS = {
   // all. The joke is that it refuses to be excited.
   grumpy: {
     pitch: 0.86,
+    rate: 1.0,
     chain:
       "equalizer=f=180:width_type=q:w=1.0:g=3," +
       "equalizer=f=3000:width_type=q:w=1.2:g=-3",
@@ -1588,12 +1609,30 @@ function buildFilterComplex({
   const effectChain = effect ? effect.chain : null;
 
   let voiceSource = "1:a";
-  if (cartoonMode && (effectivePitch !== 1.0 || effectChain)) {
+  // atempo does two jobs at once here: undo the speed change asetrate came
+  // with (1/pitch), and apply the effect's own extra slowdown (rate). One
+  // filter rather than two, so the audio is resampled once.
+  const effectRate = effect ? (effect.rate ?? 1.0) : 1.0;
+  if (cartoonMode && (effectivePitch !== 1.0 || effectChain || effectRate !== 1.0)) {
     const stages = [];
-    if (effectivePitch !== 1.0) {
-      stages.push(`asetrate=44100*${effectivePitch}`);
-      stages.push("aresample=44100");
-      stages.push(`atempo=${(1 / effectivePitch).toFixed(6)}`);
+    if (effectivePitch !== 1.0 || effectRate !== 1.0) {
+      const tempo = (1 / effectivePitch) * effectRate;
+      if (effectivePitch !== 1.0) {
+        stages.push(`asetrate=44100*${effectivePitch}`);
+        stages.push("aresample=44100");
+      }
+      // atempo only accepts 0.5-2.0 per instance; chain them if we ever go
+      // outside that rather than let ffmpeg reject the whole graph.
+      let remaining = tempo;
+      while (remaining < 0.5) {
+        stages.push("atempo=0.5");
+        remaining /= 0.5;
+      }
+      while (remaining > 2.0) {
+        stages.push("atempo=2.0");
+        remaining /= 2.0;
+      }
+      stages.push(`atempo=${remaining.toFixed(6)}`);
     }
     if (effectChain) stages.push(effectChain);
     filters.push(`[1:a]${stages.join(",")}[voice_char]`);
