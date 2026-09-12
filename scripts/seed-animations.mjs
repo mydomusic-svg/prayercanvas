@@ -57,11 +57,27 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 // Clips that animate an existing cartoon character (0015/0017). The still
 // portrait stays as the picker thumbnail; this becomes what actually plays.
+// TWO KINDS OF CHARACTER CLIP, and they need opposite treatments.
+//
+// The first four are head-and-shoulders portraits on a flat or gently
+// graded background, so the frame can be extended by stretching the clip's
+// own top edge down it — see VERTICAL_FILL below. That only works BECAUSE
+// the backdrop is featureless.
+//
+// Ziggy is a full-body character standing in a detailed space scene.
+// Stretching a starfield full of planets down the frame turns it into
+// vertical streaks; rendered side by side it was obviously wrong. A scene
+// like that wants the same fill-and-crop the background styles get, which
+// keeps the character large and centred and the scene readable.
+//
+// So a value is either a character name (portrait treatment) or an object
+// naming the treatment explicitly.
 const CHARACTER_CLIPS = {
   "bear .mov": "Boomer the Bear",
   "Unicorn kids .mov": "Sparkle the Unicorn",
   "duck dance kids.mov": "Puddles the Duck",
   "chuckles kids happy.mov": "Chuckles the Squirrel",
+  "ziggy new .mp4": { character: "Ziggy the Alien", treatment: "scene" },
 };
 
 // Everything else becomes a selectable background style. Categories match
@@ -240,12 +256,19 @@ async function main() {
   );
 
   try {
-    for (const [file, characterName] of Object.entries(CHARACTER_CLIPS)) {
+    for (const [file, entry] of Object.entries(CHARACTER_CLIPS)) {
+      const characterName = typeof entry === "string" ? entry : entry.character;
+      // "scene" clips carry their own background and are filled/cropped like
+      // a style clip; everything else gets the portrait treatment.
+      const treatment =
+        typeof entry === "string" || entry.treatment !== "scene"
+          ? VERTICAL_FILL
+          : VERTICAL_LETTERBOX;
       const src = path.join(folder, file);
       const out = path.join(workDir, `${slug(characterName)}.mp4`);
       try {
         const srcSize = (await stat(src)).size;
-        await encode(src, out, VERTICAL_FILL);
+        await encode(src, out, treatment);
         const outSize = (await stat(out)).size;
         before += srcSize; after += outSize;
 
