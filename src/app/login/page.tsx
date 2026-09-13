@@ -49,6 +49,30 @@ export default function LoginPage() {
             },
           });
 
+    // RECORD WHICH SHARED PRAYER BROUGHT THEM, if any. Best-effort on
+    // purpose: this is a statistic, and failing to record one must never
+    // cost someone their account. Only for a new signup — someone logging
+    // in did not arrive through anything.
+    if (!error && mode === "sign_up") {
+      try {
+        const ref = document.cookie
+          .split("; ")
+          .find((c) => c.startsWith("pm_ref="));
+        if (ref) {
+          const token = decodeURIComponent(ref.slice("pm_ref=".length));
+          const { data: session } = await supabase.auth.getUser();
+          if (session.user) {
+            await supabase
+              .from("users")
+              .update({ referred_by_share_token: token })
+              .eq("id", session.user.id);
+          }
+        }
+      } catch {
+        // Statistic lost, account created. The right trade.
+      }
+    }
+
     setLoading(false);
 
     if (error) {

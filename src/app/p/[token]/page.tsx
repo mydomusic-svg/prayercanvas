@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import HeroBanner from "../../hero-banner";
 import PrayerVideoPlayer from "../../prayer-video-player";
 import ShareCta from "../../share-cta";
+import RememberReferral from "../remember-referral";
 
 export default async function SharedPrayerPage({
   params,
@@ -57,6 +58,7 @@ export default async function SharedPrayerPage({
     <>
       <HeroBanner variant="slim" />
       <main className="mx-auto flex min-h-dvh max-w-xl flex-col items-center justify-center gap-6 px-6 text-center">
+      <RememberReferral token={token} />
       <h1 className="text-2xl font-semibold">{displayTitle}</h1>
 
       {renderJob?.output_url ? (
