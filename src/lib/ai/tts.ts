@@ -54,11 +54,26 @@ export type CartoonVoice =
 export const NARRATION_SPEED = 0.85;
 
 /**
- * Characters read at the same unhurried pace as the narrator. This is the
- * numeric half of the pace control; the other half is the pace sentence in
- * every voice_instructions string (see synthesizeCharacterSpeech).
+ * How fast a cartoon character reads.
+ *
+ * WAS 0.85, MATCHING THE NARRATOR, AND THAT WAS TOO SLOW — because pace was
+ * being set twice. The 0.85 multiplier stacked on top of a delivery
+ * instruction already asking for an unhurried picture-book read, and the
+ * two compounded: measured output came out at 115-142 words per minute
+ * against the narrator's ~170, and the verdict on listening was "they drag
+ * a bit".
+ *
+ * At 1.0 the instruction alone carries the pace, which is the right
+ * division of labour. The instruction can slow a phrase where slowing helps
+ * and leave the rest alone; a multiplier can only stretch everything
+ * uniformly, including the pauses, which is what makes it sound sleepy
+ * rather than gentle.
+ *
+ * Expect roughly 135-165wpm from this — still slower than the narrator,
+ * still comfortably inside picture-book range.
+ * scripts/sample-cartoon-voices.mjs prints the real number.
  */
-export const CARTOON_SPEED = 0.85;
+export const CARTOON_SPEED = 1.0;
 
 /**
  * Synthesizes speech for the Funny Cartoon category: reads `text` aloud in

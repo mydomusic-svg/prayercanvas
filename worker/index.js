@@ -35,6 +35,7 @@ import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import * as Sentry from "@sentry/node";
+import { VOICE_EFFECTS, voiceEffectStages } from "./voice-effects.js";
 
 // Errors in here are invisible by default: the worker has no user in front
 // of it, and a render that dies leaves a row marked failed with whatever
@@ -1373,84 +1374,11 @@ function truncateForThumbnail(text, maxChars) {
   return `${cut.slice(0, lastSpace > 0 ? lastSpace : maxChars)}…`;
 }
 
-// Voice presets for the Funny Cartoon category, keyed by the
-// cartoon_characters.voice_effect column (0018_cartoon_voice_effect.sql).
-//
-// `pitch` is the asetrate ratio: above 1 raises the voice, below 1 lowers
-// it. Speed is corrected back to normal separately — see the long comment
-// in buildFilterComplex. `chain` is the extra ffmpeg audio filter chain
-// that gives the voice its character beyond raw pitch.
-//
-// Ranges were chosen by ear against intelligibility: past about 1.5 up or
-// 0.72 down, consonants start dissolving and the prayer stops being
-// followable, which defeats the point.
-// NO PITCH SHIFTING. Three rounds of "still too fast" ended here, and the
-// last one found the real cause: asetrate reinterprets the stream's sample
-// rate rather than scaling pitch, so pointing it at 44100 when tts-1
-// returns 24kHz played every character 1.84x too fast. That is fixed in the
-// filter chain below and the fix stays, because `rate` still uses atempo
-// and anyone re-enabling pitch needs the correct base.
-//
-// But pitch is being retired anyway. What it buys in silliness it costs in
-// sounding rushed — raising pitch raises the formants with it, and a voice
-// shifted up reads as hurried however long it actually takes. Compensating
-// by slowing the tempo to match just trades gabbling for drawling. For a
-// prayer, an ordinary voice beats a comic one that gets the tone wrong.
-//
-// The characters stay distinct through two things that do not touch
-// perceived speed: each has its OWN OpenAI voice (six characters, six
-// voices, in cartoon_characters.openai_voice) and its own EQ shaping. The
-// bear still sits low and warm, the duck still honks in the 1.9kHz band,
-// the grumpy cloud is still dull and flat — they are simply no longer
-// transposed.
-//
-// To bring pitch back for one character, give it a `pitch` other than 1.0;
-// the chain below still supports it, and `rate` is the extra tempo
-// multiplier that keeps it from sounding hurried.
-const VOICE_EFFECTS = {
-  // Nasal and honking: scoop the chest register out and push the 1.5-2.5kHz
-  // "quack" band hard. The wobble is lighter than it was — without a
-  // transposed voice under it, the old depth read as warble, not character.
-  duck: {
-    pitch: 1.0,
-    rate: 1.0,
-    chain:
-      "equalizer=f=400:width_type=q:w=1.0:g=-6," +
-      "equalizer=f=1900:width_type=q:w=1.1:g=7," +
-      "vibrato=f=6.5:d=0.12",
-  },
-  // Small and bright: lift the presence band, very little else.
-  chipmunk: {
-    pitch: 1.0,
-    rate: 1.0,
-    chain: "equalizer=f=2600:width_type=q:w=1.0:g=4,vibrato=f=5:d=0.07",
-  },
-  // Airy rather than squeaky — the lightest touch of the six.
-  sparkle: {
-    pitch: 1.0,
-    rate: 1.0,
-    chain: "equalizer=f=3000:width_type=q:w=1.0:g=3,vibrato=f=4.5:d=0.06",
-  },
-  // Not-from-here: chorus detunes copies of the voice against itself, which
-  // reads as "modulated" without moving the words. The tremolo is much
-  // gentler than it was — at d=0.35 the level pulsed hard enough to sound
-  // agitated, and that was most of what made this one feel frantic.
-  alien: {
-    pitch: 1.0,
-    rate: 1.0,
-    chain:
-      "chorus=0.6:0.9:50|60:0.4|0.32:0.25|0.4:2|1.3,tremolo=f=5:d=0.18",
-  },
-  // Big and rumbling: lift the low end harder now that the voice is not
-  // being transposed down to get there, and take the presence band off.
-  bear: {
-    pitch: 1.0,
-    rate: 1.0,
-    chain:
-      "equalizer=f=140:width_type=q:w=1.0:g=6," +
-      "equalizer=f=2500:width_type=q:w=1.0:g=-3",
-  },
-};
+// VOICE_EFFECTS and voiceEffectStages now live in ./voice-effects.js so
+// scripts/sample-cartoon-voices.mjs can build the identical chain. Every
+// judgement about how these voices sound was previously made on samples
+// missing this processing entirely.
+
 
 /**
  * Builds an ffmpeg filter_complex string that draws the title (for the
@@ -1714,44 +1642,11 @@ function buildFilterComplex({
 
   let voiceSource = "1:a";
   // atempo does two jobs at once here: undo the speed change asetrate came
-  // with (1/pitch), and apply the effect's own extra slowdown (rate). One
-  // filter rather than two, so the audio is resampled once.
+  // with (1/pitch), and apply the effect's own extra slowdown (rate). Both
+  // live in voiceEffectStages so the preview script produces the same audio.
   const effectRate = effect ? (effect.rate ?? 1.0) : 1.0;
   if (cartoonMode && (effectivePitch !== 1.0 || effectChain || effectRate !== 1.0)) {
-    const stages = [];
-    if (effectivePitch !== 1.0 || effectRate !== 1.0) {
-      const tempo = (1 / effectivePitch) * effectRate;
-      if (effectivePitch !== 1.0) {
-        // NORMALISE TO 44.1kHz FIRST. asetrate does not shift pitch by a
-        // ratio — it reinterprets the stream as having a new sample rate,
-        // so `asetrate=44100*p` only means "p times faster" if the input
-        // really is 44100. OpenAI's tts-1 returns 24kHz mp3, so this was
-        // reinterpreting 24kHz audio as 44.1kHz and playing every cartoon
-        // voice 1.8375x too fast. atempo=1/p undoes the pitch ratio and
-        // knows nothing about the rate mismatch, so the error survived it.
-        //
-        // The damage was not subtle: a 30s read came out at 16.3s, which
-        // is why the voices sounded gabbled no matter what speed the TTS
-        // was asked for, and why the audio track ended at 55% of the video
-        // and took the music bed with it.
-        stages.push("aresample=44100");
-        stages.push(`asetrate=44100*${effectivePitch}`);
-        stages.push("aresample=44100");
-      }
-      // atempo only accepts 0.5-2.0 per instance; chain them if we ever go
-      // outside that rather than let ffmpeg reject the whole graph.
-      let remaining = tempo;
-      while (remaining < 0.5) {
-        stages.push("atempo=0.5");
-        remaining /= 0.5;
-      }
-      while (remaining > 2.0) {
-        stages.push("atempo=2.0");
-        remaining /= 2.0;
-      }
-      stages.push(`atempo=${remaining.toFixed(6)}`);
-    }
-    if (effectChain) stages.push(effectChain);
+    const stages = voiceEffectStages(effectivePitch, effectRate, effectChain);
     filters.push(`[1:a]${stages.join(",")}[voice_char]`);
     voiceSource = "voice_char";
   }

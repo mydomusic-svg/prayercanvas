@@ -26,6 +26,12 @@
 // fix is a SQL update to that row's voice_instructions — no deploy.
 
 import { createClient } from "@supabase/supabase-js";
+// The SAME table and the SAME chain builder the render worker uses. The
+// first version of this script wrote raw TTS to disk, so every judgement
+// about how these characters sound was made on audio with none of the
+// pitch or EQ the finished video applies. "They sound like adults" was
+// measured against a file that was, in fact, just an adult reading.
+import { VOICE_EFFECTS, voiceEffectStages } from "../worker/voice-effects.js";
 import OpenAI from "openai";
 import { writeFile, mkdir } from "node:fs/promises";
 import { execFile } from "node:child_process";
@@ -84,7 +90,7 @@ async function durationSeconds(path) {
 async function main() {
   const { data: characters, error } = await supabase
     .from("cartoon_characters")
-    .select("name, openai_voice, voice_instructions")
+    .select("name, openai_voice, voice_instructions, voice_effect")
     .order("name");
   if (error) throw new Error(`could not read characters: ${error.message}`);
   if (!characters?.length) throw new Error("no cartoon_characters rows found");
@@ -95,7 +101,9 @@ async function main() {
 
   const rows = [];
   for (const c of characters) {
-    process.stdout.write(`  ${c.name} (${c.openai_voice})... `);
+    const fx = c.voice_effect ? VOICE_EFFECTS[c.voice_effect] : null;
+    const pitchNote = fx && fx.pitch !== 1.0 ? ` pitch ${fx.pitch}` : "";
+    process.stdout.write(`  ${c.name} (${c.openai_voice}${pitchNote})... `);
 
     if (!c.voice_instructions) {
       console.log("NO voice_instructions — has 0028 been applied?");
@@ -108,7 +116,7 @@ async function main() {
         voice: c.openai_voice,
         input: SAMPLE_TEXT,
         instructions: c.voice_instructions ?? undefined,
-        speed: 0.85, // must match CARTOON_SPEED in src/lib/ai/tts.ts
+        speed: 1.0, // must match CARTOON_SPEED in src/lib/ai/tts.ts
         response_format: "mp3",
       });
       buffer = Buffer.from(await response.arrayBuffer());
@@ -119,8 +127,26 @@ async function main() {
     }
 
     const slug = c.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    const raw = `${OUT_DIR}/${slug}.raw.mp3`;
     const path = `${OUT_DIR}/${slug}.mp3`;
-    await writeFile(path, buffer);
+    await writeFile(raw, buffer);
+
+    // APPLY THE WORKER'S OWN EFFECT CHAIN, so what you hear is what gets
+    // rendered. Without this the samples are the bare TTS read and the
+    // pitch — the only thing that makes an adult voice read as young — is
+    // missing entirely from the thing you are judging.
+    const effect = c.voice_effect ? VOICE_EFFECTS[c.voice_effect] : null;
+    if (effect) {
+      const stages = voiceEffectStages(effect.pitch, effect.rate ?? 1.0, effect.chain);
+      try {
+        await run("ffmpeg", ["-y", "-i", raw, "-af", stages.join(","), path]);
+      } catch (err) {
+        console.log(`ffmpeg failed, keeping raw: ${err.message}`);
+        await writeFile(path, buffer);
+      }
+    } else {
+      await writeFile(path, buffer);
+    }
 
     const secs = await durationSeconds(path);
     const wpm = secs ? Math.round((WORD_COUNT / secs) * 60) : null;
@@ -128,7 +154,10 @@ async function main() {
     rows.push({ name: c.name, voice: c.openai_voice, wpm, secs });
   }
 
-  console.log(`\nWritten to ./${OUT_DIR}/ — listen to them.\n`);
+  console.log(
+    `\nWritten to ./${OUT_DIR}/ — listen to the .mp3 files (the .raw.mp3 ` +
+      `copies are the un-effected TTS, kept only for comparison).\n`
+  );
 
   const measured = rows.filter((r) => r.wpm);
   if (measured.length) {
