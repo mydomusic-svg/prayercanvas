@@ -59,6 +59,31 @@ const VIDEO_BUCKET = "prayer-videos";
 // not kept forever. A free-tier user's video is deleted this many hours
 // after it finished rendering; paid plans are exempt (see runRetentionSweep).
 // Override per-environment without a redeploy via Railway variables.
+// A SHARED PRAYER LIVES LONGER THAN AN UNSHARED ONE, and the asymmetry is
+// the entire point.
+//
+// A rendered video costs storage. A SHARED rendered video is also the only
+// thing this app has resembling a growth mechanism: someone receives a
+// link, watches the video, and meets the invitation to make one themselves.
+// Expiring both on the same clock priced those identically, and they are
+// not remotely the same.
+//
+// At 24 hours flat, a prayer sent on a Friday night and opened after church
+// on Sunday showed the recipient a polite notice and the prayer text. The
+// page handles that honestly, but the video — the part that was actually
+// sent, and the part that does the persuading — was gone. Most shared
+// prayers never reached the person they were sent to.
+//
+// So: unshared videos still go at 24 hours, which is where nearly all the
+// storage is, because most renders are never sent to anyone. A video that
+// HAS been shared is kept for 30 days, long enough that a link opened a
+// fortnight later still works. Bounded rather than indefinite — share links
+// themselves have no expiry, so "as long as the link" would mean forever
+// and simply relocate the storage problem it is meant to solve.
+const SHARED_VIDEO_RETENTION_HOURS = Number(
+  process.env.SHARED_VIDEO_RETENTION_HOURS ?? 720
+);
+
 const FREE_VIDEO_RETENTION_HOURS = Number(
   process.env.FREE_VIDEO_RETENTION_HOURS ?? 24
 );
@@ -292,7 +317,8 @@ let lastRetentionSweepAt = 0;
 
 /**
  * Deletes rendered videos belonging to free-tier users once they are older
- * than FREE_VIDEO_RETENTION_HOURS. Paid accounts are exempt and keep theirs
+ * than FREE_VIDEO_RETENTION_HOURS — or SHARED_VIDEO_RETENTION_HOURS if the
+ * prayer has ever been shared. Paid accounts are exempt and keep theirs
  * indefinitely.
  *
  * IMPORTANT, by design: this deletes the VIDEO FILES only. The prayer row,
@@ -343,6 +369,32 @@ async function runRetentionSweep() {
   }
   const ownerOf = new Map(prayers.map((p) => [p.id, p.user_id]));
 
+  // Which of these prayers has ever been sent to someone.
+  const { data: links, error: linkError } = await supabase
+    .from("share_links")
+    .select("prayer_id, expires_at")
+    .in("prayer_id", prayerIds);
+  if (linkError) {
+    // Same fail-safe stance as the plan lookup below: if we cannot tell
+    // which prayers were shared, delete NOTHING this pass. Keeping a file
+    // an extra hour costs a fraction of a cent; breaking the video at the
+    // far end of a link someone actually sent costs the thing the link was
+    // for.
+    console.error(
+      `Retention sweep: could not read share links, skipping this sweep: ${linkError.message}`
+    );
+    return;
+  }
+  const now = Date.now();
+  const sharedPrayerIds = new Set(
+    (links ?? [])
+      .filter((l) => !l.expires_at || new Date(l.expires_at).getTime() > now)
+      .map((l) => l.prayer_id)
+  );
+  const sharedCutoff = new Date(
+    now - SHARED_VIDEO_RETENTION_HOURS * 3600 * 1000
+  ).toISOString();
+
   const userIds = [...new Set(prayers.map((p) => p.user_id))];
   const paidUsers = new Set();
   const { data: users, error: userError } = await supabase
@@ -364,10 +416,20 @@ async function runRetentionSweep() {
 
   let deletedFiles = 0;
   let expiredPrayers = 0;
+  let keptShared = 0;
 
   for (const job of jobs) {
     const userId = ownerOf.get(job.prayer_id);
     if (!userId || paidUsers.has(userId)) continue;
+
+    // Shared, and still inside the longer window — leave it be.
+    if (
+      sharedPrayerIds.has(job.prayer_id) &&
+      job.completed_at >= sharedCutoff
+    ) {
+      keptShared++;
+      continue;
+    }
 
     const removed = await deletePrayerVideoFiles(userId, job.prayer_id);
     deletedFiles += removed;
@@ -388,10 +450,12 @@ async function runRetentionSweep() {
       .eq("type", "rendered_video");
   }
 
-  if (expiredPrayers > 0) {
+  if (expiredPrayers > 0 || keptShared > 0) {
     console.log(
       `Retention sweep: expired ${expiredPrayers} free-tier prayer video(s), ` +
-        `${deletedFiles} file(s) deleted (older than ${FREE_VIDEO_RETENTION_HOURS}h).`
+        `${deletedFiles} file(s) deleted (older than ${FREE_VIDEO_RETENTION_HOURS}h; ` +
+        `shared prayers keep theirs for ${SHARED_VIDEO_RETENTION_HOURS}h). ` +
+        `${keptShared} kept as shared.`
     );
   }
 }

@@ -35,3 +35,20 @@ export const FREE_DOWNLOADS_PER_DAY = 3;
  */
 export const FREE_VIDEO_RETENTION_HOURS = 24;
 export const FREE_VIDEO_RETENTION_HOURS_COPY = "24 hours";
+
+/**
+ * How long a free-tier video stays online once the prayer has been SHARED.
+ *
+ * Mirrors SHARED_VIDEO_RETENTION_HOURS in the worker. The asymmetry is
+ * deliberate: an unshared video is pure storage cost, while a shared one is
+ * the only thing the recipient of a link actually came to see. At a flat 24
+ * hours a prayer sent on Friday and opened on Sunday showed the recipient a
+ * notice instead of a video — the app quietly failing at the exact moment a
+ * stranger met it.
+ *
+ * Bounded at 30 days rather than tied to the share link, because share
+ * links have no expiry: "as long as the link" would mean forever and move
+ * the storage problem rather than solve it.
+ */
+export const SHARED_VIDEO_RETENTION_DAYS = 30;
+export const SHARED_VIDEO_RETENTION_COPY = "30 days";

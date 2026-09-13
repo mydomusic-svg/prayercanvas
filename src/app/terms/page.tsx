@@ -3,6 +3,7 @@ import {
   FREE_VIDEOS_PER_MONTH,
   FREE_DOWNLOADS_PER_DAY,
   FREE_VIDEO_RETENTION_HOURS_COPY,
+  SHARED_VIDEO_RETENTION_COPY,
 } from "@/lib/plan-limits";
 import { LegalPage, P, H2, UL, LI, LAST_UPDATED } from "../legal-shell";
 
@@ -39,8 +40,10 @@ export default function TermsPage() {
         <LI>{FREE_VIDEOS_PER_MONTH} prayer videos per calendar month.</LI>
         <LI>{FREE_DOWNLOADS_PER_DAY} downloads per day.</LI>
         <LI>
-          Rendered videos are deleted {FREE_VIDEO_RETENTION_HOURS_COPY} after they are made. The
-          prayer stays in your account; the video file does not.
+          A video you have not sent to anyone is deleted{" "}
+          {FREE_VIDEO_RETENTION_HOURS_COPY} after it is made. Once shared, it
+          is kept {SHARED_VIDEO_RETENTION_COPY}. The prayer stays in your
+          account either way and can be rendered again.
         </LI>
       </UL>
       <P>

@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
-import { FREE_VIDEO_RETENTION_HOURS_COPY } from "@/lib/plan-limits";
+import {
+  FREE_VIDEO_RETENTION_HOURS_COPY,
+  SHARED_VIDEO_RETENTION_COPY,
+} from "@/lib/plan-limits";
 import { LegalPage, P, H2, UL, LI, LAST_UPDATED } from "../legal-shell";
 
 export const metadata: Metadata = {
@@ -106,8 +109,12 @@ export default function PrivacyPage() {
       <H2>How long we keep things</H2>
       <UL>
         <LI>
-          On the free plan, <strong>rendered videos are deleted {FREE_VIDEO_RETENTION_HOURS_COPY} after they
-          are made.</strong> The prayer itself stays in your account.
+          On the free plan, a video you have <strong>not</strong> sent to
+          anyone is deleted {FREE_VIDEO_RETENTION_HOURS_COPY} after it is
+          made. Once you send a prayer, its video is kept for{" "}
+          {SHARED_VIDEO_RETENTION_COPY} so the person you sent it to can
+          still watch it. Either way the prayer itself stays in your account
+          and can be made into a video again.
         </LI>
         <LI>Share links expire.</LI>
         <LI>
