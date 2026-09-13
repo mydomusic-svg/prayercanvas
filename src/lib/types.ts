@@ -100,6 +100,13 @@ export interface CartoonCharacter {
   /** Small WebP for the picker grid; null until make-thumbnails.mjs runs. */
   thumb_asset: string | null;
   openai_voice: string;
+  /**
+   * Delivery direction handed to gpt-4o-mini-tts (0028). Null on a row
+   * seeded before that migration; tts.ts falls back to a shared
+   * kid-appropriate default rather than letting the model pick its own
+   * register.
+   */
+  voice_instructions: string | null;
   pitch_ratio: number;
   category: string | null;
   source: string | null;

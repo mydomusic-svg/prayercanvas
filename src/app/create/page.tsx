@@ -224,7 +224,7 @@ export default function CreatePrayerPage() {
       });
     supabase
       .from("cartoon_characters")
-      .select("id, name, image_asset, thumb_asset, openai_voice, pitch_ratio, category, source, license")
+      .select("id, name, image_asset, thumb_asset, openai_voice, voice_instructions, pitch_ratio, category, source, license")
       .order("created_at", { ascending: true })
       .then(({ data }) => {
         if (data) setCartoonCharacters(data as CartoonCharacter[]);

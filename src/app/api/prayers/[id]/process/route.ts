@@ -4,8 +4,9 @@ import { transcribeAudio } from "@/lib/ai/transcribe";
 import { analyzePrayer } from "@/lib/ai/analyze";
 import {
   synthesizeSpeech,
-  CARTOON_SPEED,
+  synthesizeCharacterSpeech,
   type OpenAiVoice,
+  type CartoonVoice,
 } from "@/lib/ai/tts";
 import { matchCategoriesByKeyword } from "@/lib/ai/keyword-match";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -298,19 +299,22 @@ export async function POST(
       try {
         const { data: character, error: characterError } = await supabase
           .from("cartoon_characters")
-          .select("openai_voice")
+          .select("openai_voice, voice_instructions")
           .eq("id", prayer.cartoon_character_id)
           .single();
         if (characterError || !character) {
           throw characterError ?? new Error("Cartoon character not found");
         }
 
-        // Same unhurried pace as the narrator: the pitch effect is what
-        // makes the character funny, not the speed (see tts.ts).
-        const cartoonAudioBuffer = await synthesizeSpeech(
+        // Characters go through gpt-4o-mini-tts, not tts-1, so the row's
+        // voice_instructions can direct the delivery — bright, playful,
+        // read-to-a-child. See 0028_kids_cartoon_voices.sql for why that
+        // matters and tts.ts for why pace is directed in words here rather
+        // than through a speed parameter.
+        const cartoonAudioBuffer = await synthesizeCharacterSpeech(
           transcript,
-          character.openai_voice as OpenAiVoice,
-          CARTOON_SPEED
+          character.openai_voice as CartoonVoice,
+          character.voice_instructions ?? null
         );
 
         const cartoonAudioPath = `${user.id}/${id}/cartoon.mp3`;
