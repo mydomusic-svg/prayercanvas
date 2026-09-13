@@ -34,6 +34,19 @@ import { promisify } from "node:util";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import * as Sentry from "@sentry/node";
+
+// Errors in here are invisible by default: the worker has no user in front
+// of it, and a render that dies leaves a row marked failed with whatever
+// short message reached the database. Sentry gets the stack.
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.RAILWAY_ENVIRONMENT_NAME ?? "development",
+    tracesSampleRate: 0,
+    sendDefaultPii: false,
+  });
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -190,9 +203,24 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
 
 async function main() {
-  console.log(
-    "PrayerCanvas render worker started. [build: audio-duration-fallback-v1]"
-  );
+  // WHICH CODE IS ACTUALLY RUNNING?
+  //
+  // This banner used to be a hand-written string, "audio-duration-fallback-v1",
+  // which nobody remembered to change. That made it worse than useless: a
+  // deploy that silently rebuilt a week-old commit printed exactly the same
+  // line as one carrying the fix, so the log looked like confirmation while
+  // confirming nothing. Railway's "Redeploy" button re-runs the previous
+  // snapshot rather than pulling the latest commit, so this is not a
+  // hypothetical — it happened, repeatedly, and cost an evening.
+  //
+  // RAILWAY_GIT_COMMIT_SHA is injected by Railway for git-triggered builds.
+  // A `railway up` from a laptop has no commit, so it prints "local" — which
+  // is itself worth knowing, because it means the running code may differ
+  // from anything on GitHub.
+  const commit = process.env.RAILWAY_GIT_COMMIT_SHA
+    ? process.env.RAILWAY_GIT_COMMIT_SHA.slice(0, 7)
+    : "local-upload";
+  console.log(`PrayerCanvas render worker started. [commit: ${commit}]`);
   for (;;) {
     if (shuttingDown) return;
     let handled = false;
@@ -375,6 +403,10 @@ async function maybeRunRetentionSweep() {
     await runRetentionSweep();
   } catch (err) {
     console.error("Retention sweep failed:", err);
+    // A sweep that quietly stops working shows up as a storage bill, months
+    // later — exactly the failure mode that is currently costing this
+    // project its free tier.
+    Sentry.captureException(err, { tags: { operation: "retention_sweep" } });
   }
 }
 
@@ -401,6 +433,12 @@ async function processNextJob() {
     await renderPrayer(job, workDir);
   } catch (err) {
     console.error(`Render job ${job.id} failed:`, err);
+    // The database row gets `err.message`, which for an ffmpeg failure is a
+    // single line out of a hundred. The stack and the full stderr go here.
+    Sentry.captureException(err, {
+      tags: { operation: "render_job" },
+      extra: { jobId: job.id, prayerId: job.prayer_id },
+    });
     await updateJob(job.id, {
       status: "failed",
       error: err instanceof Error ? err.message : String(err),

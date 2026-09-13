@@ -4,7 +4,7 @@ import CheckoutButton from "./checkout-button";
 import {
   FREE_VIDEOS_PER_MONTH,
   FREE_DOWNLOADS_PER_DAY,
-  FREE_VIDEO_RETENTION_DAYS,
+  FREE_VIDEO_RETENTION_HOURS_COPY,
 } from "@/lib/plan-limits";
 
 export const metadata = { title: "Pricing — PrayerMessenger" };
@@ -78,7 +78,7 @@ export default async function PricingPage() {
             <p className="text-3xl font-bold text-sage-900">$0</p>
             <p className="text-sm text-sage-600">
               {FREE_VIDEOS_PER_MONTH} prayer videos every month, on us. Videos
-              stay available for {FREE_VIDEO_RETENTION_DAYS} days and you can
+              stay available for {FREE_VIDEO_RETENTION_HOURS_COPY} and you can
               download {FREE_DOWNLOADS_PER_DAY} a day — so save the ones you
               love.
             </p>

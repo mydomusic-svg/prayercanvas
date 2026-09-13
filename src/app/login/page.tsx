@@ -14,6 +14,14 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [mode, setMode] = useState<"sign_in" | "sign_up">("sign_in");
+  // ADULT ACCOUNTS ONLY. Accounts are for grown-ups; the cartoon voices
+  // exist so a video an adult makes is fun for a child to WATCH, not so
+  // children sign up. A self-declared checkbox is not verification, but it
+  // is the standard bar for a service that is not directed to children,
+  // and it makes the intent explicit both to the user and on the record.
+  // If this ever becomes a service children sign up for, this checkbox is
+  // nowhere near enough — COPPA would require verifiable parental consent.
+  const [isAdult, setIsAdult] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,6 +29,12 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     setError(null);
+
+    if (mode === "sign_up" && !isAdult) {
+      setLoading(false);
+      setError("You need to confirm you are 18 or older to create an account.");
+      return;
+    }
 
     const { error } =
       mode === "sign_in"
@@ -77,6 +91,29 @@ export default function LoginPage() {
             <span className="text-xs text-sage-400">
               This is the name others will see — you can leave it blank to
               use your email instead.
+            </span>
+          </label>
+        )}
+        {mode === "sign_up" && (
+          <label className="flex items-start gap-3 text-sm text-sage-600">
+            <input
+              type="checkbox"
+              checked={isAdult}
+              onChange={(e) => setIsAdult(e.target.checked)}
+              // Big enough to hit with a thumb. The default checkbox is
+              // about 13px, which is half the 44px minimum a phone wants.
+              className="mt-0.5 h-5 w-5 shrink-0 rounded border-sage-300 accent-sage-600"
+            />
+            <span>
+              I am 18 or older, and I agree to the{" "}
+              <a href="/terms" className="underline" target="_blank">
+                Terms
+              </a>{" "}
+              and{" "}
+              <a href="/privacy" className="underline" target="_blank">
+                Privacy Policy
+              </a>
+              .
             </span>
           </label>
         )}

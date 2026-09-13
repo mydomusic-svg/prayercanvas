@@ -104,6 +104,14 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <a href="/credits" className="underline">
             Video &amp; music credits
           </a>
+          <span className="mx-2">&middot;</span>
+          <a href="/privacy" className="underline">
+            Privacy
+          </a>
+          <span className="mx-2">&middot;</span>
+          <a href="/terms" className="underline">
+            Terms
+          </a>
         </footer>
       </body>
     </html>

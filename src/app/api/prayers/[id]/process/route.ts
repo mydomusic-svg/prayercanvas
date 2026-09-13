@@ -10,6 +10,7 @@ import {
 } from "@/lib/ai/tts";
 import { matchCategoriesByKeyword } from "@/lib/ai/keyword-match";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { reportSwallowed } from "@/lib/report-error";
 
 /**
  * Transcribes a prayer's audio and detects its theme/title.
@@ -368,10 +369,15 @@ export async function POST(
           if (timingError) throw timingError;
         }
       } catch (cartoonErr) {
-        console.error(
-          "Cartoon voice synthesis failed (continuing without it):",
-          cartoonErr
-        );
+        // Continue without the cartoon voice — an OpenAI outage must not
+        // stop someone saving a prayer. But say so somewhere findable:
+        // this exact catch once hid a bad voice name for a whole release,
+        // and the user met it as "No audio found for this prayer" with no
+        // way to know why.
+        await reportSwallowed(cartoonErr, "cartoon_voice_synthesis", {
+          prayerId: id,
+          characterId: prayer.cartoon_character_id,
+        });
       }
     }
 
@@ -447,7 +453,9 @@ export async function POST(
           if (timingError) throw timingError;
         }
       } catch (narrationErr) {
-        console.error("Narration synthesis failed:", narrationErr);
+        await reportSwallowed(narrationErr, "narration_synthesis", {
+          prayerId: id,
+        });
       }
     }
 

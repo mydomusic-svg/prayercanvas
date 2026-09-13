@@ -1,7 +1,10 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
-/node_modules
+node_modules
+# worker/ has its own package.json and so its own node_modules; the
+# leading-slash form above only ever matched the root one, which is how
+# 7,336 dependency files nearly landed in a commit.
 /.pnp
 .pnp.*
 .yarn/*

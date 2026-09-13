@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs/config";
 
 const nextConfig: NextConfig = {
   /* config options here */
@@ -16,4 +17,17 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// Sentry wraps the build to upload source maps, so a stack trace names a
+// line of our code rather than a column in a minified bundle. Everything
+// here is inert without SENTRY_AUTH_TOKEN / DSN set, so a local build and
+// a fork's build behave exactly as before.
+export default withSentryConfig(nextConfig, {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  silent: true,
+  // Strip source maps from the client bundle after uploading them. Without
+  // this the maps ship to browsers, which hands anyone a readable copy of
+  // the whole front end.
+  sourcemaps: { deleteSourcemapsAfterUpload: true },
+});

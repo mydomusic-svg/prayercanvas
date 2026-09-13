@@ -17,9 +17,21 @@ export const FREE_DOWNLOADS_PER_DAY = 3;
 /**
  * How long a free-tier video stays online after rendering.
  *
- * Mirrors FREE_VIDEO_RETENTION_HOURS in the worker, which is a Railway
- * environment variable so it can be changed without a redeploy. This value
- * is only what the pricing page tells people, so if you change it there,
- * change it here.
+ * THIS WAS WRONG AND SAID 7 DAYS. The worker deletes at
+ * FREE_VIDEO_RETENTION_HOURS, which defaults to 24 — so the pricing page
+ * promised a week while the sweep took the file after a day. Nobody had
+ * complained yet, which is the only reason it survived: the people it hurt
+ * would have gone looking for a video on day three and found nothing, with
+ * no error and no explanation.
+ *
+ * Set to 24 hours rather than fixing the worker to 168, deliberately. The
+ * project is over its storage quota and faces restriction; honouring a
+ * 7-day promise would multiply stored video roughly sevenfold at exactly
+ * the wrong moment. A smaller honest promise beats a generous broken one.
+ *
+ * The number is expressed in hours because that is the unit the worker
+ * actually uses. Two constants, one for arithmetic and one for prose, so
+ * the copy cannot drift from the value the way "7 days" did.
  */
-export const FREE_VIDEO_RETENTION_DAYS = 7;
+export const FREE_VIDEO_RETENTION_HOURS = 24;
+export const FREE_VIDEO_RETENTION_HOURS_COPY = "24 hours";
