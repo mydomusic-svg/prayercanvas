@@ -54,13 +54,9 @@ export type CartoonVoice =
 export const NARRATION_SPEED = 0.85;
 
 /**
- * Kept only so an existing caller or script importing it still compiles.
- * Nothing uses it: cartoon characters moved to gpt-4o-mini-tts (0028),
- * which takes no speed multiplier, and their pace is directed in words
- * inside voice_instructions instead. Delete this once nothing references
- * it.
- *
- * @deprecated pace for characters lives in voice_instructions now.
+ * Characters read at the same unhurried pace as the narrator. This is the
+ * numeric half of the pace control; the other half is the pace sentence in
+ * every voice_instructions string (see synthesizeCharacterSpeech).
  */
 export const CARTOON_SPEED = 0.85;
 
@@ -135,17 +131,17 @@ export const DEFAULT_CARTOON_INSTRUCTIONS =
  * point a prayer read straight should not be steered playful — there is
  * nothing for an instructions string to usefully say.
  *
- * NO `speed` PARAMETER HERE, and that is deliberate rather than an
- * oversight. tts-1 exposes `speed` as a numeric multiplier and the
- * narrator uses it (NARRATION_SPEED). gpt-4o-mini-tts is not documented as
- * honouring it, and quietly ignoring a speed argument is exactly the
- * failure mode that produced gabbled scripture last time — the pace looked
- * set in the code and was not set in the audio. So pace is directed in
- * words, inside the instruction string itself ("unhurried… about the speed
- * of reading a picture book aloud"), where it is part of the same
- * direction as everything else and can be tuned by ear in the database.
+ * Pace is set TWICE, on purpose. `speed` is supported on this model
+ * (0.25-4.0, same as tts-1), so it is sent — a number is a far more
+ * reliable instrument than asking a model in English to slow down. But the
+ * instruction string also describes the pace in words, because `speed`
+ * stretches the audio uniformly while the instruction changes how the line
+ * is actually read, and the second is what stops a Bible verse being
+ * rattled off. They are not redundant; they act on different things.
+ *
  * scripts/sample-cartoon-voices.mjs measures the result in words per
- * minute so this is checked rather than assumed.
+ * minute regardless, because pace in this app has been assumed wrong twice
+ * and measured right once.
  */
 export async function synthesizeCharacterSpeech(
   text: string,
@@ -169,6 +165,7 @@ export async function synthesizeCharacterSpeech(
     // letting it read in the model's default register, which is an adult
     // assistant voice.
     instructions: instructions ?? DEFAULT_CARTOON_INSTRUCTIONS,
+    speed: Math.min(Math.max(CARTOON_SPEED, 0.5), 1.5),
     response_format: "mp3",
   });
 

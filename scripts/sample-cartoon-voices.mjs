@@ -14,10 +14,11 @@
 // aloud is roughly 130-170wpm. Much past 180 and it is gabbling, whatever
 // the instruction string claims.
 //
-// It also matters here specifically because gpt-4o-mini-tts takes no speed
-// parameter: pace is asked for in English, inside voice_instructions, and
-// a model asked politely to slow down may simply not. That is exactly the
-// kind of assumption worth measuring rather than trusting.
+// Pace is set two ways in the real path — a `speed` multiplier and a pace
+// sentence inside voice_instructions — and this script sends the same
+// speed the app does, so what you hear here is what a prayer will sound
+// like. Measuring is still the point: the two controls act on different
+// things and could disagree.
 //
 //   node --env-file=.env.local scripts/sample-cartoon-voices.mjs
 //
@@ -107,6 +108,7 @@ async function main() {
         voice: c.openai_voice,
         input: SAMPLE_TEXT,
         instructions: c.voice_instructions ?? undefined,
+        speed: 0.85, // must match CARTOON_SPEED in src/lib/ai/tts.ts
         response_format: "mp3",
       });
       buffer = Buffer.from(await response.arrayBuffer());
