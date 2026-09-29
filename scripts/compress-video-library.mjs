@@ -20,9 +20,18 @@
 //      the prayer's duration, so a 12-second clip looks the same as a
 //      45-second one for anything longer than 45s, and nearly the same
 //      below that. Trimming is the single biggest win on the long clips.
-//   4. BITRATE — CRF 30 with a bitrate cap. These sit BEHIND text, and the
-//      thumbnail path blurs them outright (gblur=sigma=14), so visually
-//      lossless encoding was never buying anything.
+//   4. BITRATE — CRF 23 with a bitrate cap. This was CRF 30, justified on
+//      the grounds that backgrounds "sit BEHIND text, and the thumbnail
+//      path blurs them outright". The first half holds. The second does
+//      not: gblur=sigma=14 appears ONLY in generateThumbnail. The video
+//      people actually watch is not blurred, and CRF 30 here fed a second
+//      encode in the worker, so the result was two rounds of loss on
+//      footage that started clean. Reported as "a bit blurry", correctly.
+//
+//      NOTE, and it matters before re-running this: it overwrites in
+//      place. Clips already reduced to CRF 30 cannot be recovered by
+//      re-encoding them at 23 — that just preserves the damage in a bigger
+//      file. Getting those back means re-downloading from source.
 //
 // SAFETY: dry-run by DEFAULT. It downloads and re-encodes so you can see
 // the real before/after numbers, but writes nothing until you pass
@@ -38,7 +47,7 @@
 // Options:
 //   --apply            actually overwrite the files (default: dry run)
 //   --seconds=N        max clip length, default 12
-//   --crf=N            x264 quality, higher = smaller, default 30
+//   --crf=N            x264 quality, higher = smaller, default 23
 //   --limit=N          only process the first N clips (for a quick test)
 //   --min-saving=N     skip upload unless it shrinks by at least N percent,
 //                      default 15
@@ -78,7 +87,7 @@ function flag(name, fallback) {
 
 const APPLY = process.argv.includes("--apply");
 const MAX_SECONDS = flag("seconds", 12);
-const CRF = flag("crf", 30);
+const CRF = flag("crf", 23);
 const LIMIT = flag("limit", Infinity);
 const MIN_SAVING_PCT = flag("min-saving", 15);
 

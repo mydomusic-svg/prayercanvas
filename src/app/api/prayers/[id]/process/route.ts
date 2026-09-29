@@ -9,6 +9,7 @@ import {
   type CartoonVoice,
 } from "@/lib/ai/tts";
 import { matchCategoriesByKeyword } from "@/lib/ai/keyword-match";
+import { pickRotated, lastUsedMap } from "@/lib/pick-rotated";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { reportSwallowed } from "@/lib/report-error";
 
@@ -183,18 +184,26 @@ export async function POST(
     const chosenMusicCategory = musicCategory ?? fallback.musicCategory;
     const chosenVisualCategory = visualCategory ?? fallback.visualCategory;
 
-    const pickFrom = <T extends { id: string; category: string | null }>(
-      rows: T[],
-      category: string | null
-    ): string | null => {
-      if (rows.length === 0) return null;
-      const pool = category ? rows.filter((r) => r.category === category) : rows;
-      // Falling back to the whole library rather than returning null keeps a
-      // prayer from ending up with no music at all just because its matched
-      // category happens to be empty.
-      const options = pool.length > 0 ? pool : rows;
-      return options[Math.floor(Math.random() * options.length)].id;
-    };
+    // VISUALS GET THE SAME ROTATION MUSIC ALREADY HAD. This used to be a
+    // bare random pick, which is why someone making a few prayers in a row
+    // kept seeing the same background — the rotation logic existed a few
+    // lines below and simply was not applied here.
+    const { data: recentVisuals } = wantsAutoVisual
+      ? await admin
+          .from("prayers")
+          .select("style_id, created_at")
+          .eq("user_id", user.id)
+          .not("style_id", "is", null)
+          .order("created_at", { ascending: false })
+          .limit(200)
+      : { data: null };
+
+    const lastVisualAt = lastUsedMap(
+      (recentVisuals ?? []).map((r) => ({
+        id: r.style_id as string | null,
+        created_at: r.created_at as string,
+      }))
+    );
 
     // MUSIC ROTATION.
     //
@@ -232,42 +241,18 @@ export async function POST(
 
     // Most recent use per track. The query is already newest-first, so the
     // first time a track is seen is its latest use.
-    const lastUsedAt = new Map<string, number>();
-    for (const row of recentPrayers ?? []) {
-      const id = row.music_style_id as string | null;
-      if (!id || lastUsedAt.has(id)) continue;
-      lastUsedAt.set(id, new Date(row.created_at as string).getTime());
-    }
-
-    const pickMusic = <T extends { id: string; category: string | null }>(
-      rows: T[],
-      category: string | null
-    ): string | null => {
-      if (rows.length === 0) return null;
-      const pool = category ? rows.filter((r) => r.category === category) : rows;
-      const options = pool.length > 0 ? pool : rows;
-
-      const cutoff = Date.now() - MUSIC_COOLDOWN_MS;
-      let eligible = options.filter((r) => (lastUsedAt.get(r.id) ?? 0) < cutoff);
-      // If the cooldown would rule out everything — a category smaller than
-      // the number of prayers someone just made — silence is far worse than a
-      // repeat, so fall back to the full set rather than returning null.
-      if (eligible.length === 0) eligible = options;
-
-      const unheard = eligible.filter((r) => !lastUsedAt.has(r.id));
-      if (unheard.length > 0) {
-        return unheard[Math.floor(Math.random() * unheard.length)].id;
-      }
-      return eligible.reduce((oldest, r) =>
-        (lastUsedAt.get(r.id) ?? 0) < (lastUsedAt.get(oldest.id) ?? 0) ? r : oldest
-      ).id;
-    };
+    const lastUsedAt = lastUsedMap(
+      (recentPrayers ?? []).map((r) => ({
+        id: r.music_style_id as string | null,
+        created_at: r.created_at as string,
+      }))
+    );
 
     const autoMusicStyleId = wantsAutoMusic
-      ? pickMusic(musicRows.data ?? [], chosenMusicCategory)
+      ? pickRotated(musicRows.data ?? [], chosenMusicCategory, lastUsedAt)
       : null;
     const autoStyleId = wantsAutoVisual
-      ? pickFrom(usableStyles, chosenVisualCategory)
+      ? pickRotated(usableStyles, chosenVisualCategory, lastVisualAt)
       : null;
 
     const { error: updateError } = await supabase

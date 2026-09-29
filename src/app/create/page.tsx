@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { pickRotated, lastUsedMap } from "@/lib/pick-rotated";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
@@ -128,6 +129,13 @@ export default function CreatePrayerPage() {
   const [selectedStyleCategory, setSelectedStyleCategory] = useState<
     string | null
   >(null);
+  // WHAT THIS PERSON HAS ALREADY HAD. Without it the pickers below are a
+  // bare Math.random() over a handful of items, which repeats far more than
+  // anyone expects — eight clips and four prayers is better than even odds
+  // of a repeat. Best-effort: if this never loads, the maps stay empty and
+  // selection degrades to exactly the random behaviour it had before.
+  const [lastStyleAt, setLastStyleAt] = useState<Map<string, number>>(new Map());
+  const [lastMusicAt, setLastMusicAt] = useState<Map<string, number>>(new Map());
   const [musicStyles, setMusicStyles] = useState<MusicStyle[]>([]);
   // Music, like the video style, is chosen by CATEGORY only — the specific
   // track is drawn at random at submit time (pickRandomMusicStyleId), so
@@ -222,6 +230,33 @@ export default function CreatePrayerPage() {
       .then(({ data }) => {
         if (data) setPhotoStyles(data as PhotoStyle[]);
       });
+    // Recent history, for the rotation in pickRandomStyleId /
+    // pickRandomMusicStyleId. Newest first; 200 is far more than any
+    // category holds, so it is effectively "everything this person has
+    // used".
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return;
+      supabase
+        .from("prayers")
+        .select("style_id, music_style_id, created_at")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(200)
+        .then(({ data }) => {
+          if (!data) return;
+          setLastStyleAt(
+            lastUsedMap(
+              data.map((r) => ({ id: r.style_id, created_at: r.created_at }))
+            )
+          );
+          setLastMusicAt(
+            lastUsedMap(
+              data.map((r) => ({ id: r.music_style_id, created_at: r.created_at }))
+            )
+          );
+        });
+    });
+
     supabase
       .from("cartoon_characters")
       .select("id, name, image_asset, thumb_asset, openai_voice, voice_instructions, pitch_ratio, category, source, license")
@@ -318,22 +353,18 @@ export default function CreatePrayerPage() {
   // categories, so the actual track is chosen here at the last moment. Two
   // prayers made with the same category therefore get different music rather
   // than always the same first track.
+  // Rotated, not random. Both of these used to be a bare
+  // Math.random() over the chosen category, so two or three prayers made
+  // in a row regularly landed the same track and the same background. The
+  // rotation logic already existed in the process route for Auto music; it
+  // simply never applied when a category was picked here. Same function
+  // now runs on every path — see src/lib/pick-rotated.ts.
   function pickRandomMusicStyleId(category: string | null): string | null {
-    if (musicStyles.length === 0) return null;
-    const pool = category
-      ? musicStyles.filter((m) => (m.category || "Other") === category)
-      : musicStyles;
-    const options = pool.length > 0 ? pool : musicStyles;
-    return options[Math.floor(Math.random() * options.length)].id;
+    return pickRotated(musicStyles, category, lastMusicAt);
   }
 
   function pickRandomStyleId(category: string | null): string | null {
-    if (styles.length === 0) return null;
-    const pool = category
-      ? styles.filter((s) => (s.category || "Other") === category)
-      : styles;
-    const options = pool.length > 0 ? pool : styles;
-    return options[Math.floor(Math.random() * options.length)].id;
+    return pickRotated(styles, category, lastStyleAt);
   }
 
   // VERSES HANDED OVER FROM THE BIBLE PAGE.

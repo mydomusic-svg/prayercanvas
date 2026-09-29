@@ -974,17 +974,36 @@ async function renderPrayer(job, workDir) {
       "-map", "[vfinal]",
       "-map", "[aout]",
       "-c:v", "libx264",
-      "-preset", "veryfast",
-      // Sprint 4: tuned for easy sharing (email/MMS/social) rather than
-      // ffmpeg's untuned default. CRF 23 (the implicit default when neither
-      // -crf nor -b:v is set) produced needlessly large files for content
-      // that's mostly a static/looped background with text and captions —
-      // very compressible. CRF 28 still looks clean for this content and
-      // roughly halves file size; maxrate/bufsize caps the rare high-motion
-      // background clip from spiking well past that.
-      "-crf", "28",
-      "-maxrate", "2500k",
-      "-bufsize", "5000k",
+      // THE VIDEOS LOOKED BLURRY, AND IT WAS TWO ENCODES STACKED.
+      //
+      // The background clips in the library were already re-encoded once at
+      // CRF 30 by scripts/compress-video-library.mjs, in place. Then every
+      // render re-encoded that result at CRF 28 on the veryfast preset.
+      // Generation loss on top of an already-soft source: a measured render
+      // came out at ~487kbps of video for 1080x1920 at 30fps, which is
+      // roughly a fifth of what this resolution wants.
+      //
+      // The library script justified CRF 30 partly on the grounds that
+      // backgrounds "sit BEHIND text, and the thumbnail path blurs them
+      // outright". The first half is true; the second is only true of the
+      // THUMBNAIL. BG_BLUR appears solely in generateThumbnail — the video
+      // people actually watch has no blur at all, so the reasoning did not
+      // transfer.
+      //
+      // Two changes. `medium` instead of `veryfast`: at a fixed CRF a
+      // slower preset spends longer finding a cheaper way to hit the same
+      // quality, so it gives back file size rather than costing it. That
+      // funds the second change, CRF 28 -> 22, which is where the visible
+      // improvement comes from.
+      //
+      // Render time is the cost and there is room for it — the last render
+      // ran at 2.93x realtime, so a 33-second prayer took about eleven
+      // seconds of CPU. medium is perhaps three times slower than veryfast,
+      // which still finishes comfortably inside the time the upload takes.
+      "-preset", "medium",
+      "-crf", "22",
+      "-maxrate", "4500k",
+      "-bufsize", "9000k",
       "-pix_fmt", "yuv420p",
       // faststart moves the moov atom to the front so the video can start
       // playing before it's fully downloaded — matters once these are being
@@ -1415,7 +1434,10 @@ function buildFilterComplex({
   // exactly 1080x1920, so it skips this step.
   if (hasBackgroundVideo) {
     filters.push(
-      `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,` +
+      // lanczos rather than ffmpeg's default bicubic: these clips are
+      // being scaled and cropped on every render, and lanczos holds edges
+      // noticeably better for the cost of a little CPU.
+      `[0:v]scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,` +
         `crop=1080:1920,setsar=1,fps=30[bg]`
     );
     currentLabel = "bg";
