@@ -13,7 +13,7 @@ RUN npm install --omit=dev
 # index.js imports ./voice-effects.js at startup — if this COPY is missing
 # the container builds cleanly and then dies on its first line with
 # ERR_MODULE_NOT_FOUND. Add any future worker module here too.
-COPY index.js voice-effects.js ./
+COPY index.js voice-effects.js notify.js ./
 COPY fonts ./fonts
 COPY brand ./brand
 

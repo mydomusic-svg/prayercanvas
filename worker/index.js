@@ -36,6 +36,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import * as Sentry from "@sentry/node";
 import { VOICE_EFFECTS, voiceEffectStages } from "./voice-effects.js";
+import { sendRenderReadyEmail } from "./notify.js";
 
 // Errors in here are invisible by default: the worker has no user in front
 // of it, and a render that dies leaves a row marked failed with whatever
@@ -1168,6 +1169,12 @@ async function renderPrayer(job, workDir) {
   });
 
   console.log(`Render job ${job.id} complete: ${publicUrlData.publicUrl}`);
+
+  // Awaited rather than fired and forgotten: the worker is a loop, and an
+  // unawaited promise here would be racing the next job for the same
+  // process. It swallows its own failures, so awaiting costs a second at
+  // worst and never risks the render that already succeeded.
+  await sendRenderReadyEmail(supabase, prayer, thumbnailUrl);
 }
 
 /**

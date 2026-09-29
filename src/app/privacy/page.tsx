@@ -89,6 +89,12 @@ export default function PrivacyPage() {
           <strong>Anthropic</strong> — receives the transcript to suggest a
           title and theme for your prayer.
         </LI>
+        <LI>
+          <strong>Resend</strong> — sends you the email telling you your
+          video is ready. It receives your email address and the title of
+          the prayer, so that title can appear in the subject line. It does
+          not receive your recording or the words of the prayer.
+        </LI>
       </UL>
       <P>
         Your recording and transcript leave our systems to reach OpenAI and
